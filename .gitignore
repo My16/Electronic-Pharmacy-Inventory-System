@@ -1,0 +1,34 @@
+﻿# Python/Django files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.pyo
+*.env
+.env
+venv/
+.venv/
+ENV/
+.env*
+
+# Django
+*.log
+*.pot
+*.pyc
+*~
+staticfiles/
+media/
+media_root/
+
+# Database
+db.sqlite3
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+Add to System.txt

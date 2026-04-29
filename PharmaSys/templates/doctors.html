@@ -103,8 +103,8 @@
 
     /* ── Modals ──────────────────────────────────────── */
     .modal-overlay { display:none; position:fixed; inset:0; background:rgba(13,27,42,.55); backdrop-filter:blur(4px); z-index:2000; align-items:center; justify-content:center; }
-    .modal-overlay.open { display:flex; }
-    .modal { background:#fff; border-radius:16px; width:100%; max-width:680px; max-height:90vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,.2); animation:modalIn .25s cubic-bezier(.34,1.56,.64,1) both; overflow:hidden; }
+    .modal-overlay.open { display:flex; align-items:flex-start; padding: 20px; overflow-y: auto; }
+    .modal { background:#fff; border-radius:16px; width:100%; max-width:680px; max-height:calc(100vh - 40px); min-height:0; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,.2); animation:modalIn .25s cubic-bezier(.34,1.56,.64,1) both; overflow:hidden; margin:auto; }
     @keyframes modalIn { from{opacity:0;transform:scale(.92) translateY(16px)} to{opacity:1;transform:scale(1) translateY(0)} }
 
     .modal-header { display:flex; align-items:center; justify-content:space-between; padding:18px 22px 14px; border-bottom:1px solid #f0f4f8; flex-shrink:0; }
@@ -112,7 +112,7 @@
     .modal-title i { color:#00ADB5; font-size:14px; }
     .modal-close { width:30px; height:30px; border-radius:8px; border:none; background:#f0f4f8; color:#78909c; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:13px; transition:background .15s,color .15s; }
     .modal-close:hover { background:#e0e6ed; color:#1a2433; }
-    .modal-body { padding:20px 22px; overflow-y:auto; flex:1; }
+    .modal-body { padding:20px 22px; overflow-y:auto; flex:1; min-height:0; max-height:calc(100vh - 170px); }
     .modal-footer { display:flex; align-items:center; justify-content:flex-end; gap:10px; padding:14px 22px; border-top:1px solid #f0f4f8; background:#fafbfc; flex-shrink:0; }
 
     .section-label { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.8px; color:#00ADB5; margin:16px 0 10px; padding-bottom:6px; border-bottom:1px solid #f0f4f8; display:flex; align-items:center; gap:7px; }
