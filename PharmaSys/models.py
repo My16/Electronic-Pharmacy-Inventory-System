@@ -18,6 +18,7 @@ class UserProfile(models.Model):
     ]
     user        = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     middle_name = models.CharField(max_length=100, blank=True, default='')
+    position    = models.CharField(max_length=150, blank=True, default='', verbose_name='Position/Designation')
     role        = models.CharField(max_length=20, choices=ROLE_CHOICES, default='user')
     avatar      = models.ImageField(upload_to='avatars/', blank=True, null=True)
 
@@ -27,14 +28,50 @@ class UserProfile(models.Model):
     def get_full_name_with_middle(self):
         parts = [self.user.first_name, self.middle_name, self.user.last_name]
         return ' '.join(p for p in parts if p).strip() or self.user.username
+    
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# USER PERMISSION  (per-user module access checklist)
+# ─────────────────────────────────────────────────────────────────────────────
+class UserPermission(models.Model):
+    user               = models.OneToOneField(User, on_delete=models.CASCADE, related_name='permissions')
+    inventory          = models.BooleanField(default=False)
+    stock_management   = models.BooleanField(default=False)
+    dispensing         = models.BooleanField(default=False)
+    dispensing_card    = models.BooleanField(default=False)
+    doctors            = models.BooleanField(default=False)
+    suppliers          = models.BooleanField(default=False)
+    reports            = models.BooleanField(default=False)
+    consumption_report = models.BooleanField(default=False)
+
+    MODULE_CHOICES = [
+        ("inventory",          "Medicine Inventory"),
+        ("stock_management",   "Stock Management"),
+        ("dispensing",         "Medicine Dispensing"),
+        ("dispensing_card",    "Dispensing Card"),
+        ("doctors",            "Doctors"),
+        ("suppliers",          "Suppliers"),
+        ("reports",            "Reports & Analytics"),
+        ("consumption_report", "Consumption Report"),
+    ]
+
+    def __str__(self):
+        return f"Permissions — {self.user.username}"
+
+    class Meta:
+        verbose_name = "User Permission"
 
 
 @receiver(post_save, sender=User)
 def create_or_save_user_profile(sender, instance, created, **kwargs):
     if created:
         UserProfile.objects.create(user=instance)
+        UserPermission.objects.create(user=instance)
     else:
         UserProfile.objects.get_or_create(user=instance)
+        UserPermission.objects.get_or_create(user=instance)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -57,6 +94,95 @@ class Supplier(models.Model):
     class Meta:
         ordering = ['name']
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DOCTOR  (prescribing physician — required for S2 regulated medicines)
+# ─────────────────────────────────────────────────────────────────────────────
+class Doctor(models.Model):
+    first_name       = models.CharField(max_length=100)
+    middle_name      = models.CharField(max_length=100, blank=True)
+    last_name        = models.CharField(max_length=100)
+    specialization   = models.CharField(max_length=150, blank=True,
+                           help_text="Specialization or Department")
+    prc_license_no   = models.CharField(max_length=100, unique=True,
+                           verbose_name='PRC License No.')
+    prc_expiry_date  = models.DateField(null=True, blank=True,
+                           verbose_name='PRC License Expiry')
+    s2_license_no    = models.CharField(max_length=100, blank=True,
+                           verbose_name='S2 License No.',
+                           help_text='Leave blank if doctor has no S2 license')
+    s2_expiry_date   = models.DateField(null=True, blank=True,
+                           verbose_name='S2 License Expiry')
+    contact_number   = models.CharField(max_length=50, blank=True)
+    clinic_address   = models.TextField(blank=True,
+                           verbose_name='Clinic / Hospital Address')
+    is_active        = models.BooleanField(default=True)
+    created_at       = models.DateTimeField(auto_now_add=True)
+    updated_at       = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Dr. {self.first_name} {self.last_name}"
+
+    def get_full_name(self):
+        parts = [self.first_name, self.middle_name, self.last_name]
+        return ' '.join(p for p in parts if p).strip()
+
+    # ── S2 license validity helpers ───────────────────────────
+    @property
+    def has_s2_license(self):
+        """True if a S2 license number is recorded."""
+        return bool(self.s2_license_no)
+
+    @property
+    def s2_is_expired(self):
+        if not self.s2_expiry_date:
+            return False
+        return self.s2_expiry_date < timezone.now().date()
+
+    @property
+    def s2_is_expiring_soon(self):
+        """Within 30 days."""
+        if not self.s2_expiry_date:
+            return False
+        threshold = timezone.now().date() + timezone.timedelta(days=30)
+        return timezone.now().date() <= self.s2_expiry_date <= threshold
+
+    @property
+    def s2_license_status(self):
+        """Returns 'none' | 'expired' | 'expiring_soon' | 'valid'"""
+        if not self.has_s2_license:
+            return 'none'
+        if self.s2_is_expired:
+            return 'expired'
+        if self.s2_is_expiring_soon:
+            return 'expiring_soon'
+        return 'valid'
+
+    @property
+    def s2_is_valid_for_dispensing(self):
+        """Hard gate used by the dispensing view — must have license AND not expired."""
+        return self.has_s2_license and not self.s2_is_expired
+
+    # ── PRC license validity helpers ──────────────────────────
+    @property
+    def prc_is_expired(self):
+        if not self.prc_expiry_date:
+            return False
+        return self.prc_expiry_date < timezone.now().date()
+
+    @property
+    def prc_is_expiring_soon(self):
+        if not self.prc_expiry_date:
+            return False
+        threshold = timezone.now().date() + timezone.timedelta(days=30)
+        return timezone.now().date() <= self.prc_expiry_date <= threshold
+
+    class Meta:
+        ordering = ['last_name', 'first_name']
+        verbose_name        = 'Doctor'
+        verbose_name_plural = 'Doctors'
+
+        
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MEDICINE CATEGORY
@@ -111,6 +237,9 @@ class Medicine(models.Model):
     selling_price    = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     reorder_level    = models.PositiveIntegerField(default=10)
     storage_location = models.CharField(max_length=150, blank=True)
+    is_s2_regulated  = models.BooleanField(default=False,
+                           verbose_name='S2 Regulated',
+                           help_text='Requires a valid S2 license from the prescribing doctor')
     is_active        = models.BooleanField(default=True)
     created_by       = models.ForeignKey(
                            User, on_delete=models.SET_NULL,
@@ -300,6 +429,24 @@ class Dispensing(models.Model):
     subtotal_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_amount    = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+
+    ihomis_hpatkey = models.CharField(
+                     max_length=50, blank=True, default='',
+                     db_index=True,
+                     verbose_name='iHOMIS Patient Key',
+                     help_text='hpatkey from iHOMIS hperson table')
+    ihomis_hpercode = models.CharField(
+                          max_length=50, blank=True, default='',
+                          verbose_name='Hospital Number',
+                          help_text='Cached hospital number for display')
+
+
+
+    doctor          = models.ForeignKey(
+                          'Doctor', on_delete=models.SET_NULL,
+                          null=True, blank=True, related_name='dispensings',
+                          help_text='Required when dispensing S2 regulated medicines')
     pharmacist      = models.ForeignKey(
                           User, on_delete=models.SET_NULL,
                           null=True, blank=True, related_name='dispensings')

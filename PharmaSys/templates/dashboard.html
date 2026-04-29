@@ -444,21 +444,21 @@
             </div>
             <div class="panel-list">
                 {% for m in expiring_items %}
-                <div class="panel-item">
-                    <div>
-                        <div class="panel-item-name">{{ m.medicine_name }}</div>
-                        <div class="panel-item-sub">{{ m.strength }}</div>
+                    <div class="panel-item">
+                        <div>
+                            <div class="panel-item-name">{{ m.medicine.medicine_name }}</div>
+                            <div class="panel-item-sub">{{ m.medicine.strength }}</div>
+                        </div>
+                        <span class="panel-item-val val-red">{{ m.expiry_date|date:"M d, Y" }}</span>
                     </div>
-                    <span class="panel-item-val val-red">{{ m.expiry_date|date:"M d, Y" }}</span>
-                </div>
                 {% empty %}
-                <div class="panel-empty"><i class="fas fa-check-circle" style="color:#4ade80;"></i>No medicines expiring soon</div>
+                    <div class="panel-empty"><i class="fas fa-check-circle" style="color:#4ade80;"></i>No medicines expiring soon</div>
                 {% endfor %}
             </div>
             {% if expiring_soon_count > 0 %}
-            <div class="panel-footer">
-                <a href="{% url 'inventory' %}?status=expiring">View all expiring →</a>
-            </div>
+                <div class="panel-footer">
+                    <a href="{% url 'inventory' %}?status=expiring">View all expiring →</a>
+                </div>
             {% endif %}
         </div>
 

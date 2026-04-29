@@ -327,11 +327,17 @@
                                    value="{{ user_obj.last_name }}"
                                    oninput="updatePreview()">
                         </div>
-                        <div class="form-group full" style="grid-column:span 3;">
+                        <div class="form-group" style="grid-column:span 2;">
                             <label class="form-label">Email Address</label>
                             <input type="email" name="email" class="form-control"
                                    value="{{ user_obj.email }}"
                                    placeholder="your@email.com">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Position / Designation</label>
+                            <input type="text" name="position" class="form-control"
+                                   value="{{ user_obj.profile.position }}"
+                                   placeholder="Pharmacist, Cashier, etc.">
                         </div>
                     </div>
                 </form>
@@ -410,6 +416,12 @@
                     <div class="info-item">
                         <div class="info-item-label"><i class="fas fa-id-badge"></i> Role</div>
                         <div class="info-item-value">{{ user_obj.profile.get_role_display }}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-item-label"><i class="fas fa-briefcase"></i> Position / Designation</div>
+                        <div class="info-item-value {% if not user_obj.profile.position %}muted{% endif %}">
+                            {{ user_obj.profile.position|default:"Not set" }}
+                        </div>
                     </div>
                     <div class="info-item">
                         <div class="info-item-label"><i class="fas fa-calendar"></i> Date Joined</div>

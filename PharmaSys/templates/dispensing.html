@@ -215,11 +215,114 @@
     .receipt-item-detail { display:flex; justify-content:space-between; font-size:11.5px; color:#64748b; padding-left:8px; }
     .receipt-footer { text-align:center; margin-top:14px; font-size:10.5px; color:#94a3b8; }
 
+    /* ── Doctor S2 Section ───────────────────────────── */
+    .doctor-section { padding:12px 20px; border-top:1px solid #f0f4f8; background:#fafbfc; display:none; }
+    .doctor-section.visible { display:block; }
+    .doctor-section-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; color:#7c3aed; margin-bottom:8px; display:flex; align-items:center; gap:6px; }
+    .doctor-section-label i { font-size:10px; }
+    .doctor-search-wrap { position:relative; }
+    .doctor-search-input { width:100%; border:1px solid #e0e6ed; border-radius:8px; padding:8px 11px; font-size:12.5px; font-family:'Poppins',sans-serif; color:#1a2433; outline:none; background:#fff; transition:border-color .2s,box-shadow .2s; box-sizing:border-box; }
+    .doctor-search-input:focus { border-color:#7c3aed; box-shadow:0 0 0 3px rgba(124,58,237,.1); }
+    .doctor-search-input.invalid { border-color:#dc2626; box-shadow:0 0 0 3px rgba(220,38,38,.1); }
+    .doctor-search-input.valid   { border-color:#16a34a; box-shadow:0 0 0 3px rgba(22,163,74,.08); }
+    .doctor-dropdown { display:none; position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #e0e6ed; border-top:none; border-radius:0 0 10px 10px; box-shadow:0 8px 24px rgba(0,0,0,.1); max-height:200px; overflow-y:auto; z-index:600; }
+    .doctor-dropdown.open { display:block; }
+    .doctor-option { padding:10px 13px; cursor:pointer; font-size:12.5px; color:#1a2433; border-bottom:1px solid #f4f7fb; transition:background .15s; }
+    .doctor-option:last-child { border-bottom:none; }
+    .doctor-option:hover { background:#f0f4f8; }
+    .doctor-option-name { font-weight:600; }
+    .doctor-option-sub  { font-size:11px; color:#94a3b8; margin-top:1px; }
+    .doctor-option-s2   { display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:700; padding:1px 6px; border-radius:20px; margin-left:5px; }
+    .doctor-option-s2.valid         { background:rgba(34,197,94,.1);   color:#16a34a; }
+    .doctor-option-s2.expiring_soon { background:rgba(245,158,11,.1);  color:#d97706; }
+    .doctor-option-s2.expired       { background:rgba(239,68,68,.1);   color:#dc2626; }
+    .doctor-option-s2.none          { background:rgba(148,163,184,.1); color:#64748b; }
+    .doctor-empty { padding:12px 13px; font-size:12px; color:#94a3b8; text-align:center; }
+    .doctor-selected-card { display:none; background:#fff; border:1px solid #e0e6ed; border-radius:9px; padding:10px 13px; margin-top:8px; }
+    .doctor-selected-card.show { display:flex; align-items:center; gap:10px; }
+    .doctor-selected-card.invalid-card { border-color:#dc2626; background:rgba(239,68,68,.04); }
+    .doctor-selected-card.valid-card   { border-color:#16a34a; background:rgba(22,163,74,.03); }
+    .doctor-selected-card.warning-card { border-color:#d97706; background:rgba(245,158,11,.04); }
+    .doctor-avatar { width:34px; height:34px; border-radius:10px; background:linear-gradient(135deg,#7c3aed,#6d28d9); display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px; font-weight:700; flex-shrink:0; }
+    .doctor-selected-info { flex:1; min-width:0; }
+    .doctor-selected-name { font-size:12.5px; font-weight:700; color:#1a2433; }
+    .doctor-selected-sub  { font-size:11px; color:#94a3b8; margin-top:1px; }
+    .doctor-s2-status { font-size:11px; font-weight:700; padding:2px 8px; border-radius:20px; flex-shrink:0; }
+    .doctor-s2-status.valid         { background:rgba(34,197,94,.1);   color:#16a34a; }
+    .doctor-s2-status.expiring_soon { background:rgba(245,158,11,.1);  color:#d97706; }
+    .doctor-s2-status.expired       { background:rgba(239,68,68,.1);   color:#dc2626; }
+    .doctor-s2-status.none          { background:rgba(148,163,184,.1); color:#64748b; }
+    .btn-clear-doctor { background:none; border:none; color:#94a3b8; cursor:pointer; font-size:13px; padding:3px; transition:color .15s; flex-shrink:0; }
+    .btn-clear-doctor:hover { color:#dc2626; }
+    .s2-warning-banner { display:none; background:rgba(220,38,38,.07); border:1px solid rgba(220,38,38,.2); border-radius:8px; padding:9px 12px; font-size:12px; color:#dc2626; margin-top:8px; align-items:center; gap:8px; }
+    .s2-warning-banner.show { display:flex; }
+    .s2-warning-banner i { flex-shrink:0; }
+    .s2-expiring-banner { display:none; background:rgba(245,158,11,.07); border:1px solid rgba(245,158,11,.2); border-radius:8px; padding:9px 12px; font-size:12px; color:#92400e; margin-top:8px; align-items:center; gap:8px; }
+    .s2-expiring-banner.show { display:flex; }
+
     /* Toast */
     .toast { position:fixed; bottom:26px; right:26px; background:#1a2433; color:#fff; padding:11px 16px; border-radius:10px; font-size:12.5px; font-weight:500; display:flex; align-items:center; gap:9px; box-shadow:0 8px 24px rgba(0,0,0,.2); z-index:9999; transform:translateY(70px); opacity:0; transition:transform .3s cubic-bezier(.34,1.56,.64,1),opacity .3s; pointer-events:none; max-width:360px; }
     .toast.show { transform:translateY(0); opacity:1; }
     .toast.success i { color:#4ade80; }
     .toast.error   i { color:#f87171; }
+    .toast.warning i { color:#fbbf24; }
+
+
+
+
+    /* iHOMIS Patient Selector — inside cart panel */
+    .cart-patient-lookup { padding: 12px 20px; border-bottom: 1px solid #f0f4f8; background: #f0fdfe; }
+    .cart-patient-label  { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: #00ADB5; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+    
+    .cart-ihomis-wrap    { position: relative; }
+    .cart-ihomis-input   {
+        width: 100%; border: 1px solid #b2e8eb; border-radius: 8px;
+        padding: 8px 32px 8px 10px; font-size: 12.5px;
+        font-family: 'Poppins', sans-serif; color: #1a2433;
+        outline: none; background: #fff; box-sizing: border-box;
+        transition: border-color .2s, box-shadow .2s;
+    }
+    .cart-ihomis-input:focus { border-color: #00ADB5; box-shadow: 0 0 0 3px rgba(0,173,181,.1); }
+    .cart-ihomis-spin    { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #00ADB5; font-size: 11px; display: none; }
+    .cart-ihomis-spin.show { display: block; }
+    
+    /* Dropdown */
+    .cart-ihomis-dropdown {
+        display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 700;
+        background: #fff; border: 1px solid #e0e6ed; border-top: none;
+        border-radius: 0 0 10px 10px; box-shadow: 0 8px 24px rgba(0,0,0,.12);
+        max-height: 220px; overflow-y: auto;
+    }
+    .cart-ihomis-dropdown.open { display: block; }
+    .cid-option { padding: 9px 13px; cursor: pointer; border-bottom: 1px solid #f4f7fb; transition: background .15s; }
+    .cid-option:last-child { border-bottom: none; }
+    .cid-option:hover  { background: #f0fdfe; }
+    .cid-hn   { font-size: 10px; font-weight: 700; letter-spacing: 1px; color: #00ADB5; margin-bottom: 1px; }
+    .cid-name { font-size: 12.5px; font-weight: 600; color: #1a2433; }
+    .cid-sub  { font-size: 11px; color: #94a3b8; margin-top: 1px; }
+    .cid-empty { padding: 12px; text-align: center; font-size: 12px; color: #94a3b8; }
+    
+    /* Selected patient pill */
+    .cart-patient-pill {
+        display: none; align-items: center; gap: 8px;
+        background: #fff; border: 1px solid #b2e8eb; border-radius: 8px;
+        padding: 7px 10px; margin-top: 6px;
+    }
+    .cart-patient-pill.show { display: flex; }
+    .cpp-hn   { font-size: 9.5px; font-weight: 700; letter-spacing: 1px; color: #00ADB5; text-transform: uppercase; }
+    .cpp-name { font-size: 12px; font-weight: 600; color: #1a2433; line-height: 1.2; }
+    .cpp-meta { font-size: 10.5px; color: #94a3b8; }
+    .cpp-info { flex: 1; min-width: 0; }
+    .btn-clear-patient { background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 13px; padding: 2px; transition: color .15s; flex-shrink: 0; }
+    .btn-clear-patient:hover { color: #dc2626; }
+    
+    /* iHOMIS unavailable warning */
+    .ihomis-offline-badge {
+        display: none; align-items: center; gap: 6px; margin-top: 6px;
+        background: rgba(245,158,11,.08); border: 1px solid rgba(245,158,11,.2);
+        border-radius: 7px; padding: 6px 10px; font-size: 11px; color: #92400e;
+    }
+    .ihomis-offline-badge.show { display: flex; }
 </style>
 {% endblock %}
 
@@ -397,6 +500,45 @@
         </div>
 
         <!-- Customer info -->
+        <div class="cart-patient-lookup">
+            <div class="cart-patient-label">
+                <i class="fas fa-hospital-user"></i> iHOMIS+ Patient
+                <span style="font-size:10px;font-weight:400;color:#64748b;text-transform:none;letter-spacing:0;">(optional)</span>
+            </div>
+        
+            <!-- Search input — hidden once patient is selected -->
+            <div class="cart-ihomis-wrap" id="cartIhomisWrap">
+                <input type="text"
+                    id="cartPatientSearch"
+                    class="cart-ihomis-input"
+                    placeholder="Search hospital no. or patient name…"
+                    oninput="debounceCartPatient(this.value)"
+                    onfocus="debounceCartPatient(this.value)"
+                    autocomplete="off">
+                <i class="fas fa-circle-notch fa-spin cart-ihomis-spin" id="cartPatSpin"></i>
+                <div class="cart-ihomis-dropdown" id="cartPatDropdown"></div>
+            </div>
+        
+            <!-- Selected patient pill -->
+            <div class="cart-patient-pill" id="cartPatientPill">
+                <div class="cpp-info">
+                    <div class="cpp-hn"  id="cppHN">—</div>
+                    <div class="cpp-name" id="cppName">—</div>
+                    <div class="cpp-meta" id="cppMeta">—</div>
+                </div>
+                <button class="btn-clear-patient" onclick="clearCartPatient()" title="Remove patient link">
+                    <i class="fas fa-xmark"></i>
+                </button>
+            </div>
+        
+            <!-- iHOMIS offline warning -->
+            <div class="ihomis-offline-badge" id="ihomisOfflineBadge">
+                <i class="fas fa-triangle-exclamation"></i>
+                iHOMIS+ is currently unreachable — patient linking unavailable.
+            </div>
+        </div>
+        
+        <!-- Keep your existing .cart-customer block below (name/Rx/notes fields stay) -->
         <div class="cart-customer">
             <div class="customer-label">Customer / Patient Info</div>
             <div class="customer-row">
@@ -404,6 +546,42 @@
                 <input type="text" class="customer-input" id="prescriptionNo" placeholder="Rx No. (optional)">
             </div>
             <input type="text" class="customer-input" id="customerNotes" placeholder="Notes…" style="width:100%;box-sizing:border-box;">
+        </div>
+
+        <!-- Doctor S2 Section — shown only when cart has S2 medicines -->
+        <div class="doctor-section" id="doctorSection">
+            <div class="doctor-section-label">
+                <i class="fas fa-shield-halved"></i>
+                Prescribing Doctor <span style="color:#dc2626;margin-left:2px;">*</span>
+                <span style="font-size:10px;font-weight:400;color:#94a3b8;text-transform:none;letter-spacing:0;">(required for S2 medicines)</span>
+            </div>
+            <div class="doctor-search-wrap">
+                <input type="text" id="doctorSearchInput" class="doctor-search-input"
+                       placeholder="Search doctor name or license no…"
+                       oninput="debounceDoctorSearch(this.value)"
+                       onfocus="debounceDoctorSearch(this.value)"
+                       autocomplete="off">
+                <div class="doctor-dropdown" id="doctorDropdown"></div>
+            </div>
+            <div class="doctor-selected-card" id="doctorSelectedCard">
+                <div class="doctor-avatar" id="doctorAvatar">?</div>
+                <div class="doctor-selected-info">
+                    <div class="doctor-selected-name" id="doctorSelectedName">—</div>
+                    <div class="doctor-selected-sub" id="doctorSelectedSub">—</div>
+                </div>
+                <span class="doctor-s2-status" id="doctorS2Status">—</span>
+                <button class="btn-clear-doctor" onclick="clearDoctor()" title="Change doctor">
+                    <i class="fas fa-xmark"></i>
+                </button>
+            </div>
+            <div class="s2-warning-banner" id="s2WarningBanner">
+                <i class="fas fa-circle-xmark"></i>
+                <span id="s2WarningMsg">Doctor does not have a valid S2 license.</span>
+            </div>
+            <div class="s2-expiring-banner" id="s2ExpiringBanner">
+                <i class="fas fa-triangle-exclamation"></i>
+                <span id="s2ExpiringMsg">S2 license is expiring soon — verify before dispensing.</span>
+            </div>
         </div>
 
         <!-- Cart items -->
@@ -494,8 +672,234 @@ const DISPENSE_URL        = "{% url 'dispensing_create' %}";
 const RECEIPT_URL         = "{% url 'dispensing_receipt' pk=0 %}".replace('/0/', '/');
 const CSRF_TOKEN          = '{{ csrf_token }}';
 
+const DOCTOR_SEARCH_URL   = "{% url 'doctor_search_ajax' %}";
+const DOCTOR_VALIDATE_URL = "{% url 'doctor_s2_validate_ajax' %}";
+const PATIENT_SEARCH_URL = "{% url 'patient_search_ajax' %}";
+
+
 // ── Cart State ────────────────────────────────────────────────
-let cart = [];  // [{pk, name, strength, dosage, price, qty, stock}]
+let cart = [];       // [{pk, name, strength, dosage, price, qty, stock, isS2}]
+let selectedDoctor = null;  // {pk, full_name, specialization, s2_license_status, s2_expiry_date, s2_is_valid}
+let selectedPatient = null;  // { hpatkey, hospital_number, full_name, birthdate, sex }
+
+let cartPatTimer;
+function debounceCartPatient(q) {
+    clearTimeout(cartPatTimer);
+    if (selectedPatient) return;
+    if (!q.trim()) { closeCartPatDropdown(); return; }
+    cartPatTimer = setTimeout(() => fetchCartPatients(q), 300);
+}
+ 
+function fetchCartPatients(q) {
+    if (q.length < 2) return;
+    document.getElementById('cartPatSpin').classList.add('show');
+    fetch(PATIENT_SEARCH_URL + '?q=' + encodeURIComponent(q))
+        .then(r => r.json())
+        .then(d => {
+            document.getElementById('cartPatSpin').classList.remove('show');
+            if (d.error) {
+                document.getElementById('ihomisOfflineBadge').classList.add('show');
+                closeCartPatDropdown();
+                return;
+            }
+            document.getElementById('ihomisOfflineBadge').classList.remove('show');
+            renderCartPatDropdown(d.results);
+        })
+        .catch(() => {
+            document.getElementById('cartPatSpin').classList.remove('show');
+            document.getElementById('ihomisOfflineBadge').classList.add('show');
+        });
+}
+ 
+function renderCartPatDropdown(results) {
+    const dd = document.getElementById('cartPatDropdown');
+    if (!results.length) {
+        dd.innerHTML = '<div class="cid-empty">No patients found.</div>';
+        dd.classList.add('open');
+        return;
+    }
+    dd.innerHTML = results.map(p => `
+        <div class="cid-option" onclick="selectCartPatient(${JSON.stringify(p).replace(/"/g,'&quot;')})">
+            <div class="cid-hn">${escHtml(p.hospital_number)}</div>
+            <div class="cid-name">${escHtml(p.full_name_formal)}</div>
+            <div class="cid-sub">${escHtml(p.birthdate)} · ${escHtml(p.sex)}</div>
+        </div>`).join('');
+    dd.classList.add('open');
+}
+ 
+function selectCartPatient(p) {
+    selectedPatient = p;
+    closeCartPatDropdown();
+    document.getElementById('cartPatientSearch').value = '';
+    document.getElementById('cartIhomisWrap').style.display = 'none';
+ 
+    // Show pill
+    document.getElementById('cppHN').textContent   = p.hospital_number;
+    document.getElementById('cppName').textContent  = p.full_name_formal;
+    document.getElementById('cppMeta').textContent  = `${p.birthdate} · ${p.sex}`;
+    document.getElementById('cartPatientPill').classList.add('show');
+ 
+    // Auto-fill the name field if empty
+    const nameInput = document.getElementById('customerName');
+    if (!nameInput.value.trim()) nameInput.value = p.full_name;
+ 
+    showToast(`Linked: ${p.full_name}`, 'success');
+}
+ 
+function clearCartPatient() {
+    selectedPatient = null;
+    document.getElementById('cartIhomisWrap').style.display = 'block';
+    document.getElementById('cartPatientSearch').value = '';
+    document.getElementById('cartPatientPill').classList.remove('show');
+    closeCartPatDropdown();
+}
+ 
+function closeCartPatDropdown() {
+    document.getElementById('cartPatDropdown').classList.remove('open');
+}
+
+
+// Close dropdown when clicking outside
+document.addEventListener('click', e => {
+    const wrap = document.getElementById('cartIhomisWrap');
+    if (wrap && !wrap.contains(e.target)) closeCartPatDropdown();
+});
+
+// ── Doctor Search ─────────────────────────────────────────────
+let doctorSearchTimer;
+function debounceDoctorSearch(q) {
+    clearTimeout(doctorSearchTimer);
+    if(selectedDoctor) return;  // already selected — don't re-open dropdown
+    doctorSearchTimer = setTimeout(() => fetchDoctors(q), 280);
+}
+
+function fetchDoctors(q) {
+    fetch(DOCTOR_SEARCH_URL + '?q=' + encodeURIComponent(q))
+        .then(r => r.json())
+        .then(data => renderDoctorDropdown(data.results))
+        .catch(() => {});
+}
+
+function renderDoctorDropdown(results) {
+    const dd = document.getElementById('doctorDropdown');
+    if(!results.length) {
+        dd.innerHTML = '<div class="doctor-empty">No doctors found.</div>';
+        dd.classList.add('open');
+        return;
+    }
+    const s2Labels = { valid:'Valid', expiring_soon:'Expiring Soon', expired:'Expired', none:'No S2' };
+    dd.innerHTML = results.map(d => `
+        <div class="doctor-option" onclick="selectDoctor(${JSON.stringify(d).replace(/"/g,'&quot;')})">
+            <div class="doctor-option-name">
+                Dr. ${escHtml(d.full_name)}
+                <span class="doctor-option-s2 ${d.s2_license_status}">${s2Labels[d.s2_license_status] || '—'}</span>
+            </div>
+            <div class="doctor-option-sub">
+                ${d.specialization ? escHtml(d.specialization) + ' · ' : ''}PRC: ${escHtml(d.prc_license_no)}
+                ${d.s2_license_no ? ' · S2: ' + escHtml(d.s2_license_no) : ''}
+            </div>
+        </div>`).join('');
+    dd.classList.add('open');
+}
+
+function selectDoctor(d) {
+    selectedDoctor = d;
+    document.getElementById('doctorDropdown').classList.remove('open');
+    document.getElementById('doctorSearchInput').value = `Dr. ${d.full_name}`;
+
+    // Show selected card
+    const card     = document.getElementById('doctorSelectedCard');
+    const initials = d.full_name.split(' ').map(w => w[0]).join('').substring(0,2).toUpperCase();
+    document.getElementById('doctorAvatar').textContent        = initials;
+    document.getElementById('doctorSelectedName').textContent  = `Dr. ${d.full_name}`;
+    document.getElementById('doctorSelectedSub').textContent   =
+        (d.specialization || '') + (d.s2_license_no ? ` · S2: ${d.s2_license_no}` : ' · No S2 license');
+
+    const s2Labels = { valid:'S2 Valid', expiring_soon:'S2 Expiring Soon', expired:'S2 Expired', none:'No S2' };
+    const statusEl = document.getElementById('doctorS2Status');
+    statusEl.textContent  = s2Labels[d.s2_license_status] || '—';
+    statusEl.className    = `doctor-s2-status ${d.s2_license_status}`;
+
+    // Card border color by status
+    card.className = 'doctor-selected-card show ' +
+        (d.s2_is_valid ? (d.s2_license_status === 'expiring_soon' ? 'warning-card' : 'valid-card') : 'invalid-card');
+
+    // Warning banners
+    const warnBanner    = document.getElementById('s2WarningBanner');
+    const expiringBanner= document.getElementById('s2ExpiringBanner');
+    warnBanner.classList.remove('show');
+    expiringBanner.classList.remove('show');
+
+    if(!d.s2_is_valid) {
+        document.getElementById('s2WarningMsg').textContent =
+            d.s2_license_status === 'none'
+                ? `Dr. ${d.full_name} has no S2 license on record. Cannot dispense S2 medicines.`
+                : `Dr. ${d.full_name}'s S2 license expired on ${d.s2_expiry_date}. Cannot dispense S2 medicines.`;
+        warnBanner.classList.add('show');
+    } else if(d.s2_license_status === 'expiring_soon') {
+        document.getElementById('s2ExpiringMsg').textContent =
+            `Dr. ${d.full_name}'s S2 license expires on ${d.s2_expiry_date} — verify before dispensing.`;
+        expiringBanner.classList.add('show');
+    }
+
+    updateDispenseButton();
+}
+
+function clearDoctor() {
+    selectedDoctor = null;
+    document.getElementById('doctorSearchInput').value = '';
+    document.getElementById('doctorDropdown').classList.remove('open');
+    document.getElementById('doctorSelectedCard').className = 'doctor-selected-card';
+    document.getElementById('s2WarningBanner').classList.remove('show');
+    document.getElementById('s2ExpiringBanner').classList.remove('show');
+    updateDispenseButton();
+}
+
+// Close dropdown on outside click
+document.addEventListener('click', e => {
+    const wrap = document.querySelector('.doctor-search-wrap');
+    if(wrap && !wrap.contains(e.target)) {
+        document.getElementById('doctorDropdown').classList.remove('open');
+    }
+});
+
+// ── S2 Cart Check ─────────────────────────────────────────────
+function cartHasS2() {
+    return cart.some(i => i.isS2);
+}
+
+function checkS2Cart() {
+    const section = document.getElementById('doctorSection');
+    if(cartHasS2()) {
+        section.classList.add('visible');
+    } else {
+        section.classList.remove('visible');
+        clearDoctor();
+    }
+    updateDispenseButton();
+}
+
+function updateDispenseButton() {
+    const btn = document.getElementById('btnDispense');
+    if(!cart.length) {
+        btn.disabled = true;
+        return;
+    }
+    if(cartHasS2()) {
+        if(!selectedDoctor) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-shield-halved"></i> Select S2 Doctor to Dispense';
+            return;
+        }
+        if(!selectedDoctor.s2_is_valid) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-circle-xmark"></i> Doctor S2 License Invalid';
+            return;
+        }
+    }
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-check-circle"></i> Dispense & Generate Receipt';
+}
 
 // ── Medicine Search ───────────────────────────────────────────
 let searchTimer;
@@ -535,9 +939,12 @@ function renderMedGrid(results) {
         const isOut = m.stock_status === 'out_of_stock';
         return `
         <div class="med-card ${isOut ? 'out-of-stock' : ''}"
-             onclick="${isOut ? '' : `addToCart(${m.pk},'${escHtml(m.medicine_name)}','${escHtml(m.strength)}','${escHtml(m.dosage_form)}',${m.selling_price},${m.stock_quantity})`}">
+             onclick="${isOut ? '' : `addToCart(${m.pk},'${escHtml(m.medicine_name)}','${escHtml(m.strength)}','${escHtml(m.dosage_form)}',${m.selling_price},${m.stock_quantity},${m.is_s2_regulated ? 'true' : 'false'})`}">
             <div class="med-card-add-icon"><i class="fas fa-plus"></i></div>
-            <div class="med-card-name">${escHtml(m.medicine_name)}</div>
+            <div class="med-card-name">
+                ${escHtml(m.medicine_name)}
+                ${m.is_s2_regulated ? '<span style="display:inline-flex;align-items:center;gap:3px;background:rgba(124,58,237,.12);color:#7c3aed;border-radius:20px;padding:1px 6px;font-size:9px;font-weight:700;margin-left:4px;vertical-align:middle;"><i class="fas fa-shield-halved" style="font-size:8px;"></i> S2</span>' : ''}
+            </div>
             <div class="med-card-generic">${escHtml(m.generic_name)}</div>
             <div class="med-card-form">${escHtml(m.dosage_form)} · ${escHtml(m.strength)}</div>
             <div class="med-card-bottom">
@@ -555,7 +962,7 @@ function escHtml(s) {
 }
 
 // ── Cart Operations ───────────────────────────────────────────
-function addToCart(pk, name, strength, dosage, price, stock) {
+function addToCart(pk, name, strength, dosage, price, stock, isS2 = false) {
     const existing = cart.find(i => i.pk === pk);
     if(existing) {
         if(existing.qty >= stock) {
@@ -564,9 +971,10 @@ function addToCart(pk, name, strength, dosage, price, stock) {
         }
         existing.qty++;
     } else {
-        cart.push({ pk, name, strength, dosage, price: parseFloat(price), qty: 1, stock });
+        cart.push({ pk, name, strength, dosage, price: parseFloat(price), qty: 1, stock, isS2 });
     }
     renderCart();
+    checkS2Cart();
     showToast(`${name} added to cart.`, 'success');
 }
 
@@ -637,6 +1045,7 @@ function updateCartTotalsAndCount() {
 function removeItem(pk) {
     cart = cart.filter(i => i.pk !== pk);
     renderCart();
+    checkS2Cart();
 }
 
 function clearCart() {
@@ -645,7 +1054,10 @@ function clearCart() {
     document.getElementById('prescriptionNo').value = '';
     document.getElementById('customerNotes').value  = '';
     document.getElementById('discountVal').value    = '';
+    clearDoctor();
+    clearCartPatient();
     renderCart();
+    checkS2Cart();
 }
 
 function renderCart() {
@@ -716,12 +1128,15 @@ function submitDispensing() {
     discount = Math.min(discount, subtotal);
 
     const payload = {
-        customer_name:   document.getElementById('customerName').value.trim(),
-        prescription_no: document.getElementById('prescriptionNo').value.trim(),
-        notes:           document.getElementById('customerNotes').value.trim(),
-        discount_amount: discount.toFixed(2),
-        items: cart.map(i => ({ medicine_pk: i.pk, quantity: i.qty, unit_price: i.price })),
-    };
+      customer_name:   document.getElementById('customerName').value.trim() || 'Walk-in',
+      prescription_no: document.getElementById('prescriptionNo').value.trim(),
+      notes:           document.getElementById('customerNotes').value.trim(),
+      discount_amount: discount.toFixed(2),
+      doctor_pk:       selectedDoctor ? selectedDoctor.pk : '',
+      ihomis_hpatkey:  selectedPatient ? selectedPatient.hpatkey  : '',   // ← ADD
+      ihomis_hpercode: selectedPatient ? selectedPatient.hospital_number : '',  // ← ADD
+      items: cart.map(i => ({ medicine_pk: i.pk, quantity: i.qty, unit_price: i.price })),
+  };
 
     fetch(DISPENSE_URL, {
         method: 'POST',
@@ -766,6 +1181,8 @@ function renderReceipt(r) {
         <div class="receipt-row"><span>Pharmacist</span><span>${r.pharmacist}</span></div>
         ${r.customer_name ? `<div class="receipt-row"><span>Patient</span><span>${r.customer_name}</span></div>` : ''}
         ${r.prescription_no ? `<div class="receipt-row"><span>Rx No.</span><span>${r.prescription_no}</span></div>` : ''}
+        ${r.doctor ? `<div class="receipt-row"><span>Physician</span><span>${r.doctor.name}</span></div>
+        ${r.doctor.s2_license_no ? `<div class="receipt-row"><span>S2 License</span><span>${r.doctor.s2_license_no}</span></div>` : ''}` : ''}
         <hr class="receipt-divider">
         <div class="receipt-items">
             ${r.items.map(item => `

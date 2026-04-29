@@ -23,6 +23,8 @@ urlpatterns = [
     path('api/medicine-search/',    views.medicine_search_ajax,  name='medicine_search_ajax'),
     path('api/category-search/',    views.category_search_ajax,  name='category_search_ajax'),
     path('api/category-create/',    views.category_create_ajax,  name='category_create_ajax'),
+    path('api/doctor-search/',    views.doctor_search_ajax,   name='doctor_search_ajax'),
+    path('api/doctor-s2-validate/', views.doctor_s2_validate_ajax, name='doctor_s2_validate_ajax'),
 
     # ── Stock Management ──────────────────────────────────────────────────────
     path('stock/',               views.stock_management_view, name='stock_management'),
@@ -46,6 +48,13 @@ urlpatterns = [
     path('suppliers/toggle/<int:pk>/', views.supplier_toggle_view, name='supplier_toggle'),
     path('suppliers/detail/<int:pk>/', views.supplier_detail_view, name='supplier_detail'),
 
+    # ── Doctors ───────────────────────────────────────────────────────────────
+    path('doctors/',                 views.doctors_view,       name='doctors'),
+    path('doctors/add/',             views.doctor_add_view,    name='doctor_add'),
+    path('doctors/edit/<int:pk>/',   views.doctor_edit_view,   name='doctor_edit'),
+    path('doctors/delete/<int:pk>/', views.doctor_delete_view, name='doctor_delete'),
+    path('doctors/toggle/<int:pk>/', views.doctor_toggle_view, name='doctor_toggle'),
+
     # ── User Management ───────────────────────────────────────────────────────
     path('users/',                   views.user_management_view,    name='user_management'),
     path('users/add/',               views.user_add_view,           name='user_add'),
@@ -60,4 +69,18 @@ urlpatterns = [
     path('reports/',              views.reports_view,        name='reports'),
     path('reports/export/excel/', views.report_export_excel, name='report_export_excel'),
     path('reports/export/pdf/',   views.report_export_pdf,   name='report_export_pdf'),
+    path('reports/consumption/', views.consumption_report, name='consumption_report'),
+
+
+    # ── Dispensing Card ───────────────────────────────────────────────────
+    path('dispensing/card/', views.dispensing_card_list, name='dispensing_card_list'),
+    path('dispensing/card/<path:hpatkey>/', views.dispensing_card_detail, name='dispensing_card_detail'),
+    path('dispensing/patient-search/', views.patient_search_ajax, name='patient_search_ajax'),
+    path('dispensing/patient/<int:hpatkey>/info/', views.patient_info_ajax,name='patient_info_ajax'),
+    path('dispensing/<int:pk>/link-patient/', views.link_patient_to_dispensing, name='link_patient_to_dispensing'),
+
+
+    # ── Access Management ─────────────────────────────────────────────────────
+    path('access/', views.access_management_view, name='access_management'),
+
 ]

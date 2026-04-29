@@ -63,6 +63,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'PharmaSys.context_processors.module_permissions',  # Custom context processor for module permissions
             ],
         },
     },
@@ -82,9 +83,24 @@ DATABASES = {
         'PASSWORD': 'admin',
         'HOST': 'localhost',
         'PORT': '5432',
-    }
+    },
+    'ihomis_plus': {
+        'ENGINE': 'mssql',
+        'NAME': 'hospital',
+        'USER': 'django_readonly',
+        'PASSWORD': 'dj@ngo_re@d0nly',
+        'HOST': '192.168.2.21',
+        'PORT': '1433',
+        'OPTIONS': {
+            'driver': 'ODBC Driver 18 for SQL Server',
+            'Encrypt': 'no',
+            'TrustServerCertificate': 'yes',
+            'extra_params': 'Encrypt=no;TrustServerCertificate=yes;',
+        },
+    },
 }
 
+DATABASE_ROUTERS = ['PharmaSys.routers.IHOMISRouter']
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators

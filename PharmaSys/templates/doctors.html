@@ -1,0 +1,700 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load app_extras %}
+
+{% block title %}ePIS — Doctors{% endblock %}
+{% block page_title %}Doctor Management{% endblock %}
+{% block breadcrumb %}Doctors{% endblock %}
+{% block nav_doctors %}active{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* ── Summary Cards ───────────────────────────────── */
+    .stats-row { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:22px; }
+    .stat-card { background:#fff; border-radius:14px; padding:18px 20px; display:flex; align-items:center; gap:14px; box-shadow:0 2px 12px rgba(0,0,0,.06); border:1px solid #eef2f7; animation:slideUp .4s ease both; transition:box-shadow .2s,transform .15s; }
+    .stat-card:hover { box-shadow:0 6px 20px rgba(0,0,0,.1); transform:translateY(-2px); }
+    .stat-card:nth-child(2){animation-delay:.07s} .stat-card:nth-child(3){animation-delay:.14s} .stat-card:nth-child(4){animation-delay:.21s}
+    @keyframes slideUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+    .stat-icon { width:46px; height:46px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:19px; flex-shrink:0; }
+    .stat-icon.teal   { background:rgba(0,173,181,.12);  color:#00ADB5; }
+    .stat-icon.green  { background:rgba(34,197,94,.12);  color:#16a34a; }
+    .stat-icon.purple { background:rgba(139,92,246,.12); color:#7c3aed; }
+    .stat-icon.orange { background:rgba(245,158,11,.12); color:#d97706; }
+    .stat-info { display:flex; flex-direction:column; }
+    .stat-value { font-size:24px; font-weight:700; color:#1a2433; line-height:1; }
+    .stat-label { font-size:11.5px; color:#78909c; margin-top:3px; font-weight:500; }
+
+    /* ── Table Card ──────────────────────────────────── */
+    .table-card { background:#fff; border-radius:14px; box-shadow:0 2px 12px rgba(0,0,0,.06); border:1px solid #eef2f7; overflow:hidden; animation:slideUp .4s ease .2s both; }
+    .table-toolbar { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid #f0f4f8; gap:10px; flex-wrap:wrap; }
+    .toolbar-left { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .table-title { font-size:14px; font-weight:700; color:#1a2433; }
+    .count-badge { background:rgba(0,173,181,.1); color:#00ADB5; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; }
+
+    .per-page-wrap { display:flex; align-items:center; gap:6px; font-size:12px; color:#78909c; }
+    .per-page-wrap select { border:1px solid #e0e6ed; border-radius:6px; padding:4px 8px; font-size:12px; font-family:'Poppins',sans-serif; color:#1a2433; outline:none; background:#fff; cursor:pointer; }
+
+    .search-box { position:relative; display:flex; align-items:center; }
+    .search-box i { position:absolute; left:10px; color:#b0bec5; font-size:12px; }
+    .search-box input { border:1px solid #e0e6ed; border-radius:7px; padding:7px 12px 7px 30px; font-size:12.5px; font-family:'Poppins',sans-serif; color:#1a2433; outline:none; width:210px; background:#f8fafc; transition:border-color .2s,box-shadow .2s; }
+    .search-box input:focus { border-color:#00ADB5; box-shadow:0 0 0 3px rgba(0,173,181,.1); background:#fff; }
+
+    .filter-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:12px 20px; border-bottom:1px solid #f0f4f8; background:#fafbfc; }
+    .filter-label { font-size:11.5px; font-weight:600; color:#78909c; }
+    .filter-select { border:1px solid #e0e6ed; border-radius:7px; padding:6px 10px; font-size:12.5px; font-family:'Poppins',sans-serif; color:#1a2433; outline:none; background:#fff; cursor:pointer; transition:border-color .2s; }
+    .filter-select:focus { border-color:#00ADB5; }
+
+    .btn-add { display:flex; align-items:center; gap:7px; background:#00ADB5; color:#fff; border:none; border-radius:9px; padding:8px 16px; font-size:13px; font-weight:600; font-family:'Poppins',sans-serif; cursor:pointer; transition:background .2s,transform .15s; box-shadow:0 2px 8px rgba(0,173,181,.25); white-space:nowrap; }
+    .btn-add:hover { background:#008C9E; transform:translateY(-1px); }
+
+    /* Table */
+    .data-table { width:100%; border-collapse:collapse; }
+    .data-table thead th { background:#f8fafc; padding:10px 16px; text-align:left; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.7px; color:#78909c; border-bottom:1px solid #eef2f7; white-space:nowrap; }
+    .data-table tbody tr { border-bottom:1px solid #f4f7fb; transition:background .15s; }
+    .data-table tbody tr:last-child { border-bottom:none; }
+    .data-table tbody tr:hover { background:#f8fafc; }
+    .data-table td { padding:12px 16px; font-size:12.5px; color:#1a2433; vertical-align:middle; }
+
+    .doctor-name { font-weight:600; color:#1a2433; }
+    .doctor-sub  { font-size:11px; color:#94a3b8; margin-top:1px; }
+
+    /* S2 / PRC license badges */
+    .license-badge { display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:700; white-space:nowrap; }
+    .license-badge.valid         { background:rgba(34,197,94,.1);   color:#16a34a; }
+    .license-badge.expiring_soon { background:rgba(245,158,11,.1);  color:#d97706; }
+    .license-badge.expired       { background:rgba(239,68,68,.1);   color:#dc2626; }
+    .license-badge.none          { background:rgba(148,163,184,.1); color:#64748b; }
+
+    .status-badge { display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:20px; font-size:11px; font-weight:700; }
+    .status-badge.active   { background:rgba(34,197,94,.1);  color:#16a34a; }
+    .status-badge.inactive { background:rgba(239,68,68,.1);  color:#dc2626; }
+    .status-dot { width:5px; height:5px; border-radius:50%; flex-shrink:0; }
+    .active   .status-dot { background:#16a34a; }
+    .inactive .status-dot { background:#dc2626; }
+
+    .license-no { font-size:11.5px; font-weight:600; color:#1a2433; font-family:'Courier New', monospace; }
+    .license-no.empty { color:#b0bec5; font-weight:400; font-style:italic; font-family:'Poppins',sans-serif; }
+
+    .action-btns { display:flex; align-items:center; gap:5px; }
+    .btn-icon { width:30px; height:30px; border-radius:7px; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:12px; transition:background .15s,transform .15s; }
+    .btn-icon:hover { transform:translateY(-1px); }
+    .btn-icon.edit      { background:rgba(0,173,181,.1);  color:#00ADB5; }
+    .btn-icon.edit:hover      { background:rgba(0,173,181,.2); }
+    .btn-icon.toggle-on  { background:rgba(34,197,94,.1);  color:#16a34a; }
+    .btn-icon.toggle-on:hover  { background:rgba(34,197,94,.2); }
+    .btn-icon.toggle-off { background:rgba(239,68,68,.1);  color:#dc2626; }
+    .btn-icon.toggle-off:hover { background:rgba(239,68,68,.2); }
+    .btn-icon.delete    { background:rgba(239,68,68,.1);  color:#dc2626; }
+    .btn-icon.delete:hover    { background:rgba(239,68,68,.2); }
+
+    .empty-state { text-align:center; padding:56px 20px; }
+    .empty-state i { font-size:38px; margin-bottom:12px; display:block; color:#d1d9e0; }
+    .empty-state p { font-size:13.5px; color:#90a4ae; }
+
+    /* ── Pagination ──────────────────────────────────── */
+    .pagination-bar { display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-top:1px solid #f0f4f8; flex-wrap:wrap; gap:10px; }
+    .pagination-info { font-size:12.5px; color:#78909c; }
+    .pagination-info strong { color:#1a2433; }
+    .pagination-links { display:flex; align-items:center; gap:4px; }
+    .page-btn { width:32px; height:32px; border-radius:8px; border:1px solid #e0e6ed; background:#fff; color:#64748b; font-size:12.5px; font-weight:600; font-family:'Poppins',sans-serif; cursor:pointer; display:flex; align-items:center; justify-content:center; text-decoration:none; transition:background .15s,border-color .15s; }
+    .page-btn:hover { background:#f0f4f8; border-color:#cdd5df; }
+    .page-btn.active { background:#00ADB5; border-color:#00ADB5; color:#fff; }
+    .page-btn.disabled { opacity:.4; pointer-events:none; }
+
+    /* ── Modals ──────────────────────────────────────── */
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(13,27,42,.55); backdrop-filter:blur(4px); z-index:2000; align-items:center; justify-content:center; }
+    .modal-overlay.open { display:flex; }
+    .modal { background:#fff; border-radius:16px; width:100%; max-width:680px; max-height:90vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,.2); animation:modalIn .25s cubic-bezier(.34,1.56,.64,1) both; overflow:hidden; }
+    @keyframes modalIn { from{opacity:0;transform:scale(.92) translateY(16px)} to{opacity:1;transform:scale(1) translateY(0)} }
+
+    .modal-header { display:flex; align-items:center; justify-content:space-between; padding:18px 22px 14px; border-bottom:1px solid #f0f4f8; flex-shrink:0; }
+    .modal-title { font-size:15px; font-weight:700; color:#1a2433; display:flex; align-items:center; gap:9px; }
+    .modal-title i { color:#00ADB5; font-size:14px; }
+    .modal-close { width:30px; height:30px; border-radius:8px; border:none; background:#f0f4f8; color:#78909c; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:13px; transition:background .15s,color .15s; }
+    .modal-close:hover { background:#e0e6ed; color:#1a2433; }
+    .modal-body { padding:20px 22px; overflow-y:auto; flex:1; }
+    .modal-footer { display:flex; align-items:center; justify-content:flex-end; gap:10px; padding:14px 22px; border-top:1px solid #f0f4f8; background:#fafbfc; flex-shrink:0; }
+
+    .section-label { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.8px; color:#00ADB5; margin:16px 0 10px; padding-bottom:6px; border-bottom:1px solid #f0f4f8; display:flex; align-items:center; gap:7px; }
+    .section-label:first-child { margin-top:0; }
+    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .form-grid.cols-3 { grid-template-columns:1fr 1fr 1fr; }
+    .form-grid.full { grid-template-columns:1fr; }
+    .form-group { display:flex; flex-direction:column; gap:4px; }
+    .form-label { font-size:11.5px; font-weight:600; color:#64748b; letter-spacing:.3px; }
+    .form-label .req { color:#dc2626; margin-left:2px; }
+    .form-control { width:100%; padding:8px 11px; border:1px solid #e0e6ed; border-radius:8px; font-size:12.5px; font-family:'Poppins',sans-serif; color:#1a2433; outline:none; background:#f8fafc; transition:border-color .2s,box-shadow .2s; box-sizing:border-box; }
+    .form-control:focus { border-color:#00ADB5; box-shadow:0 0 0 3px rgba(0,173,181,.1); background:#fff; }
+    textarea.form-control { resize:vertical; min-height:72px; }
+
+    /* S2 warning callout inside modal */
+    .s2-callout { background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.25); border-radius:10px; padding:10px 14px; font-size:12px; color:#92400e; display:flex; align-items:flex-start; gap:9px; margin-top:4px; }
+    .s2-callout i { color:#d97706; margin-top:1px; flex-shrink:0; }
+
+    .btn-cancel { padding:8px 18px; border-radius:8px; border:1px solid #e0e6ed; background:#fff; color:#64748b; font-size:12.5px; font-weight:600; font-family:'Poppins',sans-serif; cursor:pointer; transition:background .15s; }
+    .btn-cancel:hover { background:#f0f4f8; }
+    .btn-submit { padding:8px 22px; border-radius:8px; border:none; background:#00ADB5; color:#fff; font-size:12.5px; font-weight:600; font-family:'Poppins',sans-serif; cursor:pointer; transition:background .2s; box-shadow:0 2px 8px rgba(0,173,181,.25); }
+    .btn-submit:hover { background:#008C9E; }
+    .btn-danger { padding:8px 20px; border-radius:8px; border:none; background:#dc2626; color:#fff; font-size:12.5px; font-weight:600; font-family:'Poppins',sans-serif; cursor:pointer; transition:background .2s; }
+    .btn-danger:hover { background:#b91c1c; }
+
+    /* Delete modal */
+    .modal.modal-sm { max-width:380px; }
+    .delete-body { padding:24px; text-align:center; }
+    .delete-icon { width:54px; height:54px; border-radius:50%; background:rgba(239,68,68,.1); display:flex; align-items:center; justify-content:center; margin:0 auto 12px; font-size:20px; color:#dc2626; }
+    .delete-title { font-size:15px; font-weight:700; color:#1a2433; margin-bottom:5px; }
+    .delete-msg   { font-size:12.5px; color:#78909c; line-height:1.6; }
+    .delete-msg strong { color:#1a2433; }
+
+    /* Toast */
+    .toast { position:fixed; bottom:26px; right:26px; background:#1a2433; color:#fff; padding:11px 16px; border-radius:10px; font-size:12.5px; font-weight:500; display:flex; align-items:center; gap:9px; box-shadow:0 8px 24px rgba(0,0,0,.2); z-index:9999; transform:translateY(70px); opacity:0; transition:transform .3s cubic-bezier(.34,1.56,.64,1),opacity .3s; pointer-events:none; max-width:360px; }
+    .toast.show { transform:translateY(0); opacity:1; }
+    .toast.success i { color:#4ade80; }
+    .toast.error   i { color:#f87171; }
+    .toast.warning i { color:#fbbf24; }
+</style>
+{% endblock %}
+
+
+{% block content %}
+
+<!-- Summary Cards -->
+<div class="stats-row">
+    <div class="stat-card">
+        <div class="stat-icon teal"><i class="fas fa-user-doctor"></i></div>
+        <div class="stat-info">
+            <span class="stat-value">{{ total_doctors }}</span>
+            <span class="stat-label">Total Doctors</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon green"><i class="fas fa-circle-check"></i></div>
+        <div class="stat-info">
+            <span class="stat-value">{{ active_doctors }}</span>
+            <span class="stat-label">Active Doctors</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon purple"><i class="fas fa-id-card"></i></div>
+        <div class="stat-info">
+            <span class="stat-value">{{ s2_licensed }}</span>
+            <span class="stat-label">S2 Licensed</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon orange"><i class="fas fa-triangle-exclamation"></i></div>
+        <div class="stat-info">
+            <span class="stat-value">{{ expiring_soon }}</span>
+            <span class="stat-label">S2 Expiring Soon</span>
+        </div>
+    </div>
+</div>
+
+<!-- Doctor Table -->
+<div class="table-card">
+    <div class="table-toolbar">
+        <div class="toolbar-left">
+            <span class="table-title">Doctor List</span>
+            <span class="count-badge">{{ paginator.count }} total</span>
+            <div class="per-page-wrap">
+                Show
+                <select onchange="changePerPage(this.value)">
+                    {% for opt in per_page_options %}
+                    <option value="{{ opt }}" {% if per_page == opt %}selected{% endif %}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
+                entries
+            </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <form method="GET" id="searchForm">
+                <input type="hidden" name="status"   value="{{ status_filter }}">
+                <input type="hidden" name="s2"       value="{{ s2_filter }}">
+                <input type="hidden" name="per_page" value="{{ per_page }}">
+                <div class="search-box">
+                    <i class="fas fa-search"></i>
+                    <input type="text" name="search" placeholder="Search name, PRC, S2…"
+                           value="{{ search }}" autocomplete="off"
+                           oninput="debounceSearch(this)">
+                </div>
+            </form>
+            <button class="btn-add" onclick="openAddModal()">
+                <i class="fas fa-plus"></i> Add Doctor
+            </button>
+        </div>
+    </div>
+
+    <!-- Filter bar -->
+    <div class="filter-bar">
+        <span class="filter-label">Filter:</span>
+        <select class="filter-select" onchange="applyFilter('status', this.value)">
+            <option value="">All Statuses</option>
+            <option value="active"   {% if status_filter == 'active'   %}selected{% endif %}>Active</option>
+            <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive</option>
+        </select>
+        <select class="filter-select" onchange="applyFilter('s2', this.value)">
+            <option value="">All S2 Statuses</option>
+            <option value="valid"         {% if s2_filter == 'valid'         %}selected{% endif %}>S2 Valid</option>
+            <option value="expiring_soon" {% if s2_filter == 'expiring_soon' %}selected{% endif %}>S2 Expiring Soon</option>
+            <option value="expired"       {% if s2_filter == 'expired'       %}selected{% endif %}>S2 Expired</option>
+            <option value="none"          {% if s2_filter == 'none'          %}selected{% endif %}>No S2 License</option>
+        </select>
+        {% if search or status_filter or s2_filter %}
+        <a href="{% url 'doctors' %}" style="font-size:12px;color:#dc2626;text-decoration:none;font-weight:600;">
+            <i class="fas fa-xmark"></i> Clear
+        </a>
+        {% endif %}
+    </div>
+
+    <!-- Table -->
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Doctor</th>
+                <th>PRC License No.</th>
+                <th>PRC Expiry</th>
+                <th>S2 License No.</th>
+                <th>S2 Expiry / Status</th>
+                <th>Contact</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for d in doctors %}
+            <tr id="row-{{ d.pk }}">
+                <td style="color:#b0bec5;font-size:11.5px;">{{ page_obj.start_index|add:forloop.counter0 }}</td>
+                <td>
+                    <div class="doctor-name">Dr. {{ d.get_full_name }}</div>
+                    {% if d.specialization %}
+                    <div class="doctor-sub"><i class="fas fa-stethoscope" style="font-size:10px;"></i> {{ d.specialization }}</div>
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="license-no">{{ d.prc_license_no }}</span>
+                    {% if d.prc_is_expired %}
+                    <span class="license-badge expired" style="margin-top:3px;display:inline-flex;"><i class="fas fa-xmark-circle"></i> Expired</span>
+                    {% elif d.prc_is_expiring_soon %}
+                    <span class="license-badge expiring_soon" style="margin-top:3px;display:inline-flex;"><i class="fas fa-clock"></i> Expiring</span>
+                    {% endif %}
+                </td>
+                <td style="font-size:12px;color:{% if d.prc_is_expired %}#dc2626{% elif d.prc_is_expiring_soon %}#d97706{% else %}#64748b{% endif %};">
+                    {% if d.prc_expiry_date %}{{ d.prc_expiry_date|date:"M d, Y" }}{% else %}<span style="color:#b0bec5;">—</span>{% endif %}
+                </td>
+                <td>
+                    {% if d.s2_license_no %}
+                    <span class="license-no">{{ d.s2_license_no }}</span>
+                    {% else %}
+                    <span class="license-no empty">None</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if d.s2_license_status == 'valid' %}
+                        <span class="license-badge valid"><i class="fas fa-circle-check"></i> Valid</span>
+                        {% if d.s2_expiry_date %}<div style="font-size:11px;color:#64748b;margin-top:2px;">{{ d.s2_expiry_date|date:"M d, Y" }}</div>{% endif %}
+                    {% elif d.s2_license_status == 'expiring_soon' %}
+                        <span class="license-badge expiring_soon"><i class="fas fa-clock"></i> Expiring Soon</span>
+                        {% if d.s2_expiry_date %}<div style="font-size:11px;color:#d97706;margin-top:2px;">{{ d.s2_expiry_date|date:"M d, Y" }}</div>{% endif %}
+                    {% elif d.s2_license_status == 'expired' %}
+                        <span class="license-badge expired"><i class="fas fa-xmark-circle"></i> Expired</span>
+                        {% if d.s2_expiry_date %}<div style="font-size:11px;color:#dc2626;margin-top:2px;">{{ d.s2_expiry_date|date:"M d, Y" }}</div>{% endif %}
+                    {% else %}
+                        <span class="license-badge none"><i class="fas fa-minus-circle"></i> No S2</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if d.contact_number %}
+                    <a href="tel:{{ d.contact_number }}" style="color:#00ADB5;text-decoration:none;font-weight:500;font-size:12.5px;">
+                        <i class="fas fa-phone" style="font-size:11px;"></i> {{ d.contact_number }}
+                    </a>
+                    {% else %}<span style="color:#b0bec5;">—</span>{% endif %}
+                </td>
+                <td>
+                    <span id="status-{{ d.pk }}" class="status-badge {% if d.is_active %}active{% else %}inactive{% endif %}">
+                        <span class="status-dot"></span>
+                        {% if d.is_active %}Active{% else %}Inactive{% endif %}
+                    </span>
+                </td>
+                <td>
+                    <div class="action-btns">
+                        <button class="btn-icon edit" title="Edit"
+                                data-pk="{{ d.pk }}"
+                                data-first_name="{{ d.first_name }}"
+                                data-middle_name="{{ d.middle_name }}"
+                                data-last_name="{{ d.last_name }}"
+                                data-specialization="{{ d.specialization }}"
+                                data-prc_license_no="{{ d.prc_license_no }}"
+                                data-prc_expiry_date="{{ d.prc_expiry_date|date:'Y-m-d' }}"
+                                data-s2_license_no="{{ d.s2_license_no }}"
+                                data-s2_expiry_date="{{ d.s2_expiry_date|date:'Y-m-d' }}"
+                                data-contact_number="{{ d.contact_number }}"
+                                data-clinic_address="{{ d.clinic_address }}"
+                                onclick="openEditModal(this)">
+                            <i class="fas fa-pen-to-square"></i>
+                        </button>
+                        <button class="btn-icon {% if d.is_active %}toggle-on{% else %}toggle-off{% endif %}"
+                                title="{% if d.is_active %}Deactivate{% else %}Activate{% endif %}"
+                                id="toggle-{{ d.pk }}"
+                                data-pk="{{ d.pk }}"
+                                onclick="toggleDoctor(this)">
+                            <i class="fas {% if d.is_active %}fa-toggle-on{% else %}fa-toggle-off{% endif %}"></i>
+                        </button>
+                        {% if can_admin %}
+                        <button class="btn-icon delete" title="Deactivate & Remove"
+                                data-pk="{{ d.pk }}"
+                                data-name="Dr. {{ d.get_full_name }}"
+                                onclick="openDeleteModal(this)">
+                            <i class="fas fa-trash-can"></i>
+                        </button>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="9">
+                    <div class="empty-state">
+                        <i class="fas fa-user-doctor"></i>
+                        <p>No doctors found{% if search %} for "<strong>{{ search }}</strong>"{% endif %}.</p>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Pagination -->
+    {% if paginator.num_pages > 1 %}
+    <div class="pagination-bar">
+        <div class="pagination-info">
+            Showing <strong>{{ page_obj.start_index }}</strong>–<strong>{{ page_obj.end_index }}</strong>
+            of <strong>{{ paginator.count }}</strong> doctors
+        </div>
+        <div class="pagination-links">
+            {% if page_obj.has_previous %}
+            <a class="page-btn" href="?{% url_replace 'page' 1 %}">«</a>
+            <a class="page-btn" href="?{% url_replace 'page' page_obj.previous_page_number %}">‹</a>
+            {% else %}
+            <span class="page-btn disabled">«</span>
+            <span class="page-btn disabled">‹</span>
+            {% endif %}
+
+            {% for num in paginator.page_range %}
+                {% if page_obj.number == num %}
+                    <span class="page-btn active">{{ num }}</span>
+                {% elif num >= page_obj.number|add:'-2' and num <= page_obj.number|add:'2' %}
+                    <a class="page-btn" href="?{% url_replace 'page' num %}">{{ num }}</a>
+                {% endif %}
+            {% endfor %}
+
+            {% if page_obj.has_next %}
+            <a class="page-btn" href="?{% url_replace 'page' page_obj.next_page_number %}">›</a>
+            <a class="page-btn" href="?{% url_replace 'page' paginator.num_pages %}">»</a>
+            {% else %}
+            <span class="page-btn disabled">›</span>
+            <span class="page-btn disabled">»</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+
+<!-- ══ ADD MODAL ══ -->
+<div class="modal-overlay" id="addModal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title"><i class="fas fa-user-plus"></i> Add New Doctor</div>
+            <button class="modal-close" onclick="closeModal('addModal')"><i class="fas fa-xmark"></i></button>
+        </div>
+        <form method="POST" action="{% url 'doctor_add' %}">{% csrf_token %}
+            <div class="modal-body">
+
+                <div class="section-label"><i class="fas fa-user"></i> Personal Information</div>
+                <div class="form-grid cols-3">
+                    <div class="form-group">
+                        <label class="form-label">First Name <span class="req">*</span></label>
+                        <input type="text" name="first_name" class="form-control" required placeholder="e.g. Juan">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Middle Name</label>
+                        <input type="text" name="middle_name" class="form-control" placeholder="Optional">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Last Name <span class="req">*</span></label>
+                        <input type="text" name="last_name" class="form-control" required placeholder="e.g. Dela Cruz">
+                    </div>
+                </div>
+                <div class="form-grid" style="margin-top:12px;">
+                    <div class="form-group">
+                        <label class="form-label">Specialization / Department</label>
+                        <input type="text" name="specialization" class="form-control" placeholder="e.g. Internal Medicine">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Contact Number</label>
+                        <input type="text" name="contact_number" class="form-control" placeholder="+63 9xx xxx xxxx">
+                    </div>
+                </div>
+
+                <div class="section-label" style="margin-top:16px;"><i class="fas fa-id-card"></i> PRC License</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label class="form-label">PRC License No. <span class="req">*</span></label>
+                        <input type="text" name="prc_license_no" class="form-control" required placeholder="e.g. 0123456">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">PRC Expiry Date</label>
+                        <input type="date" name="prc_expiry_date" class="form-control">
+                    </div>
+                </div>
+
+                <div class="section-label" style="margin-top:16px;"><i class="fas fa-shield-halved"></i> S2 License <span style="font-weight:400;text-transform:none;font-size:10px;color:#78909c;">(for regulated medicines)</span></div>
+                <div class="s2-callout">
+                    <i class="fas fa-circle-info"></i>
+                    <span>S2 license is required to prescribe Schedule 2 regulated medicines. Leave blank if the doctor does not hold an S2 license.</span>
+                </div>
+                <div class="form-grid" style="margin-top:10px;">
+                    <div class="form-group">
+                        <label class="form-label">S2 License No.</label>
+                        <input type="text" name="s2_license_no" class="form-control" placeholder="e.g. S2-0012345">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">S2 Expiry Date</label>
+                        <input type="date" name="s2_expiry_date" class="form-control">
+                    </div>
+                </div>
+
+                <div class="section-label" style="margin-top:16px;"><i class="fas fa-location-dot"></i> Clinic / Hospital</div>
+                <div class="form-group">
+                    <label class="form-label">Clinic / Hospital Address</label>
+                    <textarea name="clinic_address" class="form-control" placeholder="Complete address…"></textarea>
+                </div>
+
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-cancel" onclick="closeModal('addModal')">Cancel</button>
+                <button type="submit" class="btn-submit"><i class="fas fa-user-plus" style="margin-right:5px"></i>Add Doctor</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+
+<!-- ══ EDIT MODAL ══ -->
+<div class="modal-overlay" id="editModal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title"><i class="fas fa-pen-to-square"></i> Edit Doctor</div>
+            <button class="modal-close" onclick="closeModal('editModal')"><i class="fas fa-xmark"></i></button>
+        </div>
+        <form method="POST" id="editForm" action="">{% csrf_token %}
+            <div class="modal-body">
+
+                <div class="section-label"><i class="fas fa-user"></i> Personal Information</div>
+                <div class="form-grid cols-3">
+                    <div class="form-group">
+                        <label class="form-label">First Name <span class="req">*</span></label>
+                        <input type="text" name="first_name" id="e_first_name" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Middle Name</label>
+                        <input type="text" name="middle_name" id="e_middle_name" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Last Name <span class="req">*</span></label>
+                        <input type="text" name="last_name" id="e_last_name" class="form-control" required>
+                    </div>
+                </div>
+                <div class="form-grid" style="margin-top:12px;">
+                    <div class="form-group">
+                        <label class="form-label">Specialization / Department</label>
+                        <input type="text" name="specialization" id="e_specialization" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Contact Number</label>
+                        <input type="text" name="contact_number" id="e_contact_number" class="form-control">
+                    </div>
+                </div>
+
+                <div class="section-label" style="margin-top:16px;"><i class="fas fa-id-card"></i> PRC License</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label class="form-label">PRC License No. <span class="req">*</span></label>
+                        <input type="text" name="prc_license_no" id="e_prc_license_no" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">PRC Expiry Date</label>
+                        <input type="date" name="prc_expiry_date" id="e_prc_expiry_date" class="form-control">
+                    </div>
+                </div>
+
+                <div class="section-label" style="margin-top:16px;"><i class="fas fa-shield-halved"></i> S2 License</div>
+                <div class="s2-callout">
+                    <i class="fas fa-circle-info"></i>
+                    <span>Clear the S2 License No. to remove S2 privileges. Updating the expiry date will immediately affect dispensing eligibility.</span>
+                </div>
+                <div class="form-grid" style="margin-top:10px;">
+                    <div class="form-group">
+                        <label class="form-label">S2 License No.</label>
+                        <input type="text" name="s2_license_no" id="e_s2_license_no" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">S2 Expiry Date</label>
+                        <input type="date" name="s2_expiry_date" id="e_s2_expiry_date" class="form-control">
+                    </div>
+                </div>
+
+                <div class="section-label" style="margin-top:16px;"><i class="fas fa-location-dot"></i> Clinic / Hospital</div>
+                <div class="form-group">
+                    <label class="form-label">Clinic / Hospital Address</label>
+                    <textarea name="clinic_address" id="e_clinic_address" class="form-control"></textarea>
+                </div>
+
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-cancel" onclick="closeModal('editModal')">Cancel</button>
+                <button type="submit" class="btn-submit"><i class="fas fa-floppy-disk" style="margin-right:5px"></i>Save Changes</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+
+<!-- ══ DELETE MODAL ══ -->
+<div class="modal-overlay" id="deleteModal">
+    <div class="modal modal-sm">
+        <div class="delete-body">
+            <div class="delete-icon"><i class="fas fa-user-xmark"></i></div>
+            <div class="delete-title">Deactivate Doctor</div>
+            <p class="delete-msg">
+                Deactivate <strong id="deleteDoctorName"></strong>?
+                The record will be preserved for dispensing history but the doctor will be blocked from future S2 transactions.
+            </p>
+        </div>
+        <form method="POST" id="deleteForm" action="">{% csrf_token %}
+            <div class="modal-footer" style="justify-content:center;gap:12px;">
+                <button type="button" class="btn-cancel" onclick="closeModal('deleteModal')">Cancel</button>
+                <button type="submit" class="btn-danger"><i class="fas fa-user-xmark" style="margin-right:5px"></i>Yes, Deactivate</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="toast" id="toast"><i class="fas fa-circle-check"></i><span id="toastMsg"></span></div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script>
+const URLS = {
+    doctor_edit:   "{% url 'doctor_edit'   pk=0 %}".replace('/0/', '/'),
+    doctor_delete: "{% url 'doctor_delete' pk=0 %}".replace('/0/', '/'),
+    doctor_toggle: "{% url 'doctor_toggle' pk=0 %}".replace('/0/', '/'),
+};
+
+// ── Modal helpers ──────────────────────────────────────────────
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(o => {
+    o.addEventListener('click', e => { if (e.target === o) o.classList.remove('open'); });
+});
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') document.querySelectorAll('.modal-overlay.open').forEach(o => o.classList.remove('open'));
+});
+
+// ── Add Modal ─────────────────────────────────────────────────
+function openAddModal() { openModal('addModal'); }
+
+// ── Edit Modal ────────────────────────────────────────────────
+function openEditModal(btn) {
+    const pk = btn.getAttribute('data-pk');
+    document.getElementById('editForm').action = URLS.doctor_edit + pk + '/';
+    document.getElementById('e_first_name').value      = btn.getAttribute('data-first_name')      || '';
+    document.getElementById('e_middle_name').value     = btn.getAttribute('data-middle_name')     || '';
+    document.getElementById('e_last_name').value       = btn.getAttribute('data-last_name')       || '';
+    document.getElementById('e_specialization').value  = btn.getAttribute('data-specialization')  || '';
+    document.getElementById('e_prc_license_no').value  = btn.getAttribute('data-prc_license_no')  || '';
+    document.getElementById('e_prc_expiry_date').value = btn.getAttribute('data-prc_expiry_date') || '';
+    document.getElementById('e_s2_license_no').value   = btn.getAttribute('data-s2_license_no')   || '';
+    document.getElementById('e_s2_expiry_date').value  = btn.getAttribute('data-s2_expiry_date')  || '';
+    document.getElementById('e_contact_number').value  = btn.getAttribute('data-contact_number')  || '';
+    document.getElementById('e_clinic_address').value  = btn.getAttribute('data-clinic_address')  || '';
+    openModal('editModal');
+}
+
+// ── Delete Modal ──────────────────────────────────────────────
+function openDeleteModal(btn) {
+    document.getElementById('deleteForm').action = URLS.doctor_delete + btn.getAttribute('data-pk') + '/';
+    document.getElementById('deleteDoctorName').textContent = btn.getAttribute('data-name');
+    openModal('deleteModal');
+}
+
+// ── Toggle Active ─────────────────────────────────────────────
+function toggleDoctor(btn) {
+    const pk = btn.getAttribute('data-pk');
+    fetch(URLS.doctor_toggle + pk + '/', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const isActive  = data.is_active;
+            const statusEl  = document.getElementById('status-' + pk);
+            const toggleBtn = document.getElementById('toggle-' + pk);
+
+            statusEl.className = `status-badge ${isActive ? 'active' : 'inactive'}`;
+            statusEl.innerHTML = `<span class="status-dot"></span>${isActive ? 'Active' : 'Inactive'}`;
+
+            toggleBtn.className = `btn-icon ${isActive ? 'toggle-on' : 'toggle-off'}`;
+            toggleBtn.querySelector('i').className = `fas ${isActive ? 'fa-toggle-on' : 'fa-toggle-off'}`;
+            toggleBtn.title = isActive ? 'Deactivate' : 'Activate';
+
+            showToast(data.message, 'success');
+        } else {
+            showToast(data.error || 'Something went wrong.', 'error');
+        }
+    })
+    .catch(() => showToast('Network error.', 'error'));
+}
+
+// ── Filters ───────────────────────────────────────────────────
+function applyFilter(param, value) {
+    const url = new URL(window.location.href);
+    value ? url.searchParams.set(param, value) : url.searchParams.delete(param);
+    url.searchParams.delete('page');
+    window.location.href = url.toString();
+}
+
+function changePerPage(value) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('per_page', value);
+    url.searchParams.delete('page');
+    window.location.href = url.toString();
+}
+
+let searchTimer;
+function debounceSearch(input) {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => document.getElementById('searchForm').submit(), 500);
+}
+
+// ── Toast ─────────────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+    const toast = document.getElementById('toast');
+    const icon  = toast.querySelector('i');
+    document.getElementById('toastMsg').textContent = msg;
+    toast.className = `toast ${type}`;
+    icon.className  = type === 'success' ? 'fas fa-circle-check'
+                    : type === 'warning' ? 'fas fa-triangle-exclamation'
+                    : 'fas fa-circle-xmark';
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 3200);
+}
+
+{% if messages %}{% for message in messages %}
+    showToast("{{ message|escapejs }}", "{% if 'error' in message.tags %}error{% else %}success{% endif %}");
+{% endfor %}{% endif %}
+</script>
+{% endblock %}

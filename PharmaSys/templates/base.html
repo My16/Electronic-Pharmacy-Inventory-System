@@ -45,42 +45,84 @@
         </a>
 
         <!-- MANAGEMENT -->
-        {% if role == "admin" or role == "staff" or request.user.is_staff or request.user.is_superuser %}
+        {% if perm.inventory or perm.stock_management or perm.dispensing or perm.dispensing_card or perm.doctors or perm.suppliers %}
         <span class="nav-section-label">Management</span>
+        {% endif %}
 
+        {% if perm.inventory %}
         <a href="{% url 'inventory' %}"
            class="nav-item {% block nav_inventory %}{% endblock %}"
            data-tooltip="Inventory">
             <i class="fas fa-boxes-stacked"></i>
             <span class="nav-label">Medicine Inventory</span>
         </a>
+        {% endif %}
 
+        {% if perm.stock_management %}
         <a href="{% url 'stock_management' %}"
            class="nav-item {% block nav_stock %}{% endblock %}"
            data-tooltip="Stock Management">
             <i class="fas fa-box"></i>
             <span class="nav-label">Stock Management</span>
         </a>
+        {% endif %}
 
+        {% if perm.dispensing %}
         <a href="{% url 'dispensing' %}"
            class="nav-item {% block nav_dispensing %}{% endblock %}"
            data-tooltip="Medicine Dispensing">
             <i class="fas fa-pills"></i>
             <span class="nav-label">Medicine Dispensing</span>
         </a>
+        {% endif %}
 
+        {% if perm.dispensing_card %}
+        <a href="{% url 'dispensing_card_list' %}"
+           class="nav-item {% block nav_dispensing_card %}{% endblock %}"
+           data-tooltip="Dispensing Card">
+            <i class="fas fa-id-card-clip"></i>
+            <span class="nav-label">Dispensing Card</span>
+        </a>
+        {% endif %}
+
+        {% if perm.doctors %}
+        <a href="{% url 'doctors' %}"
+           class="nav-item {% block nav_doctors %}{% endblock %}"
+           data-tooltip="Doctors">
+            <i class="fas fa-user-md"></i>
+            <span class="nav-label">Doctors</span>
+        </a>
+        {% endif %}
+
+        {% if perm.suppliers %}
         <a href="{% url 'suppliers' %}"
            class="nav-item {% block nav_suppliers %}{% endblock %}"
            data-tooltip="Suppliers">
             <i class="fas fa-truck"></i>
             <span class="nav-label">Suppliers</span>
         </a>
+        {% endif %}
 
+        <!-- REPORTS -->
+        {% if perm.reports or perm.consumption_report %}
+        <span class="nav-section-label">Reports</span>
+        {% endif %}
+
+        {% if perm.reports %}
         <a href="{% url 'reports' %}"
            class="nav-item {% block nav_reports %}{% endblock %}"
            data-tooltip="Reports & Analytics">
             <i class="fas fa-file-lines"></i>
             <span class="nav-label">Reports & Analytics</span>
+        </a>
+        {% endif %}
+
+        {% if perm.consumption_report %}
+        <a href="{% url 'consumption_report' %}"
+           class="nav-item {% block nav_consumption_report %}{% endblock %}"
+           data-tooltip="Consumption Report">
+            <i class="fas fa-chart-bar"></i>
+            <span class="nav-label">Consumption Report</span>
         </a>
         {% endif %}
 
@@ -94,6 +136,13 @@
             <i class="fas fa-users-gear"></i>
             <span class="nav-label">User Management</span>
         </a>
+
+        <!-- <a href="{% url 'access_management' %}"
+           class="nav-item {% block nav_access %}{% endblock %}"
+           data-tooltip="Access Management">
+            <i class="fas fa-key"></i>
+            <span class="nav-label">Access Management</span>
+        </a> -->
         {% endif %}
 
         <!-- ACCOUNT -->

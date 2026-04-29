@@ -1,0 +1,1288 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}ePIS — Patient Dispensing Card{% endblock %}
+{% block page_title %}Patient Dispensing Card{% endblock %}
+{% block breadcrumb %}Dispensing Card{% endblock %}
+{% block nav_dispensing_card %}active{% endblock %}
+
+{% block extra_css %}
+<style>
+/* ── Variables ───────────────────────────────────────────────────────── */
+:root {
+  --navy:       #0c1f3f;
+  --navy-mid:   #1a3460;
+  --teal:       #00ADB5;
+  --teal-dim:   #007f87;
+  --teal-pale:  #e6f9fa;
+  --gold:       #9a7b2f;
+  --gold-pale:  #fdf6e3;
+  --red:        #b91c1c;
+  --green:      #15803d;
+  --amber:      #92400e;
+  --paper:      #fffefb;
+  --cream:      #f7f4ef;
+  --border:     #e4dfd6;
+  --muted:      #7a7670;
+  --text:       #1a1612;
+}
+
+@keyframes slideUp { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:none} }
+@keyframes spin    { to { transform: rotate(360deg); } }
+.spin { display: inline-block; animation: spin .8s linear infinite; }
+
+/* ── Screen Layout ───────────────────────────────────────────────────── */
+.dc-wrap { display: grid; grid-template-columns: 340px 1fr; gap: 20px; align-items: start; }
+
+/* ── Sidebar ─────────────────────────────────────────────────────────── */
+.dc-sidebar {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 2px 14px rgba(0,0,0,.07);
+  border: 1px solid #eef2f7;
+  overflow: hidden;
+  position: sticky;
+  top: 80px;
+  animation: slideUp .4s ease both;
+}
+
+.sidebar-head {
+  background: var(--navy);
+  padding: 18px 20px;
+  display: flex; align-items: center; gap: 10px;
+}
+.sidebar-head-icon {
+  width: 38px; height: 38px; border-radius: 10px;
+  background: rgba(0,173,181,.25);
+  display: flex; align-items: center; justify-content: center;
+  color: #7ae9ed; font-size: 16px; flex-shrink: 0;
+}
+.sidebar-head-text { flex: 1; }
+.sidebar-head-title { font-size: 13.5px; font-weight: 700; color: #fff; }
+.sidebar-head-sub   { font-size: 11px; color: rgba(255,255,255,.5); margin-top: 1px; }
+
+/* Patient search */
+.patient-search-wrap { padding: 14px 16px; border-bottom: 1px solid #f0f4f8; background: #fafbfc; }
+.patient-search-box  { position: relative; }
+.patient-search-box .search-icon {
+  position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+  color: #b0bec5; font-size: 13px; pointer-events: none; z-index: 1;
+}
+.patient-search-box input {
+  width: 100%; border: 1px solid #e0e6ed; border-radius: 9px;
+  padding: 9px 12px 9px 34px; font-size: 13px; font-family: 'Poppins', sans-serif;
+  color: var(--text); outline: none; background: #fff; box-sizing: border-box;
+  transition: border-color .2s, box-shadow .2s;
+}
+.patient-search-box input:focus {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px rgba(0,173,181,.12);
+}
+
+/* Dropdown results */
+.patient-dropdown {
+  display: none;
+  position: absolute; top: calc(100% + 2px); left: 0; right: 0; z-index: 600;
+  background: #fff;
+  border: 1px solid #c8dde0;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.13);
+  max-height: 320px; overflow-y: auto;
+}
+.patient-dropdown.open { display: block; }
+
+.pat-option {
+  padding: 11px 14px; cursor: pointer;
+  border-bottom: 1px solid #f0f4f8;
+  transition: background .15s;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.pat-option:last-child { border-bottom: none; }
+.pat-option:hover { background: #f0fdfe; }
+.pat-option-hn   {
+  font-size: 10px; font-weight: 700; letter-spacing: 1px;
+  text-transform: uppercase; color: var(--teal);
+}
+.pat-option-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.pat-option-sub  { font-size: 11px; color: #94a3b8; }
+.pat-option-empty {
+  padding: 20px 14px; text-align: center;
+  font-size: 12px; color: #94a3b8;
+}
+.pat-option-empty i { display: block; font-size: 22px; margin-bottom: 6px; color: #d1d9e0; }
+
+/* Selected patient card */
+.pat-selected-card {
+  display: none; margin: 0 16px 14px;
+  background: var(--navy);
+  border-radius: 11px; padding: 14px;
+  animation: slideUp .25s ease;
+}
+.pat-selected-card.show { display: block; }
+.pat-card-hn    { font-size: 10px; font-weight: 700; letter-spacing: 1.5px; color: rgba(0,173,181,.9); text-transform: uppercase; margin-bottom: 4px; }
+.pat-card-name  { font-size: 15px; font-weight: 700; color: #fff; line-height: 1.3; }
+.pat-card-meta  { font-size: 11px; color: rgba(255,255,255,.55); margin-top: 4px; line-height: 1.8; }
+.pat-card-meta span { margin-right: 10px; }
+.pat-card-phic  {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: rgba(0,173,181,.15); color: #7ae9ed;
+  border-radius: 20px; padding: 2px 9px;
+  font-size: 10.5px; font-weight: 600; margin-top: 6px;
+}
+.btn-change-pat {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; margin-top: 10px; padding: 7px;
+  border: 1px solid rgba(255,255,255,.15); border-radius: 8px;
+  background: transparent; color: rgba(255,255,255,.6);
+  font-size: 12px; font-weight: 500; font-family: 'Poppins', sans-serif;
+  cursor: pointer; transition: background .2s;
+}
+.btn-change-pat:hover { background: rgba(255,255,255,.08); color: #fff; }
+
+/* Quick stats in sidebar */
+.sidebar-stats {
+  padding: 14px 16px; border-top: 1px solid #f0f4f8;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+}
+.ss-card {
+  background: #f8fafc; border: 1px solid #eef2f7;
+  border-radius: 10px; padding: 11px 12px; text-align: center;
+}
+.ss-val  { font-size: 20px; font-weight: 800; color: var(--navy); line-height: 1; }
+.ss-lbl  { font-size: 10.5px; color: #94a3b8; margin-top: 3px; font-weight: 500; }
+
+/* Sidebar empty/loading */
+.sidebar-empty { padding: 32px 20px; text-align: center; color: #b0bec5; }
+.sidebar-empty i { font-size: 36px; margin-bottom: 10px; display: block; color: #dde3ea; }
+.sidebar-empty p { font-size: 12.5px; line-height: 1.6; }
+
+/* Search loading indicator */
+.search-loading {
+  display: none; align-items: center; gap: 8px;
+  padding: 12px 14px; font-size: 12px; color: #94a3b8;
+}
+.search-loading.show { display: flex; }
+
+/* ── Main Content Area ───────────────────────────────────────────────── */
+.dc-main { animation: slideUp .4s ease .1s both; }
+
+/* Toolbar */
+.dc-toolbar {
+  background: #fff; border-radius: 14px; border: 1px solid #eef2f7;
+  box-shadow: 0 2px 10px rgba(0,0,0,.06);
+  padding: 14px 20px;
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 16px; flex-wrap: wrap;
+}
+.dc-toolbar-title {
+  font-size: 14px; font-weight: 700; color: var(--text);
+  flex: 1; display: flex; align-items: center; gap: 8px;
+}
+.dc-toolbar-title i { color: var(--teal); }
+
+.btn-print-card {
+  display: flex; align-items: center; gap: 7px; padding: 9px 18px;
+  background: var(--navy); color: #fff; border: none; border-radius: 9px;
+  font-size: 13px; font-weight: 600; font-family: 'Poppins', sans-serif;
+  cursor: pointer; transition: background .2s;
+}
+.btn-print-card:hover { background: var(--navy-mid); }
+.btn-print-card:disabled { opacity: .4; cursor: not-allowed; }
+
+.filter-wrap { display: flex; align-items: center; gap: 8px; }
+.filter-wrap select, .filter-wrap input[type="date"] {
+  border: 1px solid #e0e6ed; border-radius: 8px; padding: 7px 10px;
+  font-size: 12.5px; font-family: 'Poppins', sans-serif; color: var(--text);
+  outline: none; background: #fff; cursor: pointer;
+}
+.filter-wrap select:focus, .filter-wrap input[type="date"]:focus { border-color: var(--teal); }
+
+/* ── Transaction list ────────────────────────────────────────────────── */
+.txn-list { display: flex; flex-direction: column; gap: 12px; }
+
+.txn-card {
+  background: #fff; border-radius: 13px; border: 1px solid #eef2f7;
+  box-shadow: 0 2px 8px rgba(0,0,0,.05); overflow: hidden;
+  transition: box-shadow .2s, border-color .2s;
+}
+.txn-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.09); border-color: #d4eef0; }
+
+.txn-card-header {
+  display: flex; align-items: center; gap: 12px; padding: 13px 18px;
+  border-bottom: 1px solid #f4f7fb; background: #fafcfc; cursor: pointer;
+}
+.txn-date-badge {
+  text-align: center; background: var(--navy); color: #fff;
+  border-radius: 9px; padding: 7px 11px; flex-shrink: 0; min-width: 52px;
+}
+.txn-date-badge .txn-day   { font-size: 18px; font-weight: 800; line-height: 1; }
+.txn-date-badge .txn-month { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; opacity: .7; }
+.txn-date-badge .txn-year  { font-size: 10px; opacity: .5; }
+
+.txn-header-info { flex: 1; min-width: 0; }
+.txn-no     { font-size: 11px; font-weight: 700; color: var(--teal); letter-spacing: .8px; text-transform: uppercase; }
+.txn-rx     { font-size: 12px; color: #94a3b8; margin-top: 1px; }
+.txn-doctor { font-size: 12px; color: #64748b; margin-top: 2px; display: flex; align-items: center; gap: 5px; }
+
+.txn-header-right { text-align: right; flex-shrink: 0; }
+.txn-total  { font-size: 16px; font-weight: 800; color: var(--teal); }
+.txn-units  { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+.txn-expand-icon { font-size: 12px; color: #b0bec5; margin-left: 10px; transition: transform .25s; }
+.txn-card.expanded .txn-expand-icon { transform: rotate(180deg); }
+
+/* Expandable body */
+.txn-card-body { display: none; padding: 0 18px 14px; }
+.txn-card.expanded .txn-card-body { display: block; }
+
+.med-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+.med-table thead th {
+  background: #f8fafc; padding: 8px 12px; text-align: left;
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px;
+  color: #78909c; border-bottom: 1px solid #eef2f7; white-space: nowrap;
+}
+.med-table tbody td { padding: 9px 12px; font-size: 12.5px; border-bottom: 1px solid #f4f7fb; vertical-align: middle; }
+.med-table tbody tr:last-child td { border-bottom: none; }
+.med-name    { font-weight: 600; color: var(--text); }
+.med-generic { font-size: 11px; color: #94a3b8; margin-top: 1px; }
+.s2-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  background: rgba(124,58,237,.1); color: #6d28d9;
+  border-radius: 20px; padding: 1px 7px; font-size: 10px; font-weight: 700;
+  vertical-align: middle; margin-left: 4px;
+}
+
+.txn-footer-row {
+  display: flex; justify-content: flex-end; gap: 16px; align-items: center;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid #f0f4f8;
+  font-size: 12.5px;
+}
+.txn-footer-row .lbl   { color: #94a3b8; }
+.txn-footer-row .val   { font-weight: 600; color: var(--text); }
+.txn-footer-row .grand { font-size: 14px; font-weight: 800; color: var(--teal); }
+
+.pharmacist-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #f0f4f8; border-radius: 20px; padding: 3px 10px;
+  font-size: 11.5px; color: #64748b;
+}
+.pharmacist-chip-av {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: linear-gradient(135deg,#00ADB5,#007f87);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 9px; font-weight: 700;
+}
+
+/* Empty/loading states */
+.dc-empty {
+  background: #fff; border-radius: 14px; border: 1px solid #eef2f7;
+  padding: 60px 20px; text-align: center;
+}
+.dc-empty i  { font-size: 40px; color: #dde3ea; display: block; margin-bottom: 12px; }
+.dc-empty h3 { font-size: 15px; font-weight: 700; color: #78909c; margin-bottom: 6px; }
+.dc-empty p  { font-size: 12.5px; color: #b0bec5; }
+
+.dc-loading {
+  display: none; align-items: center; justify-content: center; gap: 10px;
+  padding: 60px; background: #fff; border-radius: 14px; border: 1px solid #eef2f7;
+  color: #78909c; font-size: 13px;
+}
+.dc-loading.show { display: flex; }
+
+/* iHOMIS unavailable banner */
+.ihomis-warn {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(180,83,9,.08); border: 1px solid rgba(180,83,9,.2);
+  border-radius: 10px; padding: 12px 16px; margin-bottom: 14px;
+  font-size: 12.5px; color: #92400e;
+}
+.ihomis-warn i { flex-shrink: 0; font-size: 15px; }
+
+/* No-results found state (inside dropdown) */
+.dd-error {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px; font-size: 12px; color: #f59e0b;
+  background: rgba(245,158,11,.06);
+}
+
+/* ── Print Preview Modal ─────────────────────────────────────────────── */
+/* Backdrop — fixed, covers whole viewport, IS the scroll container */
+#pvBackdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9990;
+  background: rgba(8, 16, 34, 0.78);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  overflow-y: auto;
+  padding: 36px 20px 56px;
+  /* center the modal horizontally */
+  justify-content: center;
+  align-items: flex-start;
+}
+#pvBackdrop.open { display: flex; animation: pvFadeIn .18s ease both; }
+
+@keyframes pvFadeIn  { from { opacity: 0 } to { opacity: 1 } }
+@keyframes pvSlideUp { from { opacity: 0; transform: translateY(18px) } to { opacity: 1; transform: none } }
+
+/* The modal box itself — does NOT scroll, backdrop does */
+#pvModal {
+  width: min(860px, 100%);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.1);
+  display: flex;
+  flex-direction: column;
+  animation: pvSlideUp .22s ease both;
+  /* prevent modal from collapsing */
+  flex-shrink: 0;
+}
+
+/* Modal header */
+.pv-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 18px;
+  background: #0c1f3f;
+  flex-shrink: 0;
+}
+.pv-head-icon {
+  width: 34px; height: 34px; border-radius: 8px;
+  background: rgba(0,173,181,.2);
+  display: flex; align-items: center; justify-content: center;
+  color: #7ae9ed; font-size: 14px; flex-shrink: 0;
+}
+.pv-head-text  { flex: 1; min-width: 0; }
+.pv-head-title {
+  font-size: 13px; font-weight: 700; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pv-head-sub   { font-size: 11px; color: rgba(255,255,255,.4); margin-top: 1px; }
+.pv-filter-chip {
+  display: none; align-items: center; gap: 5px;
+  background: rgba(0,173,181,.18); color: #7ae9ed;
+  border-radius: 20px; padding: 3px 10px;
+  font-size: 11px; font-weight: 600; flex-shrink: 0;
+}
+.pv-filter-chip.show { display: inline-flex; }
+.btn-pv-print {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 16px;
+  background: #00ADB5; color: #fff; border: none; border-radius: 8px;
+  font-size: 13px; font-weight: 700; font-family: 'Poppins', sans-serif;
+  cursor: pointer; flex-shrink: 0;
+  box-shadow: 0 2px 10px rgba(0,173,181,.3);
+  transition: background .15s, transform .1s;
+}
+.btn-pv-print:hover  { background: #008a91; }
+.btn-pv-print:active { transform: scale(.97); }
+.btn-pv-close {
+  width: 30px; height: 30px; border-radius: 7px;
+  background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
+  color: rgba(255,255,255,.6); font-size: 13px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; flex-shrink: 0; transition: background .15s;
+}
+.btn-pv-close:hover { background: rgba(255,255,255,.16); color: #fff; }
+
+/* Grey tray behind the paper */
+.pv-tray {
+  background: #d8dfe9;
+  padding: 24px 24px 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Loading row */
+.pv-loading {
+  display: flex; align-items: center; gap: 10px;
+  padding: 60px 0; color: #64748b; font-size: 13px;
+}
+.pv-loading i { color: #00ADB5; }
+
+/* A4 paper card */
+.pv-paper {
+  width: 794px; /* A4 @ 96dpi */
+  background: #fff;
+  border-radius: 2px;
+  box-shadow: 0 4px 8px rgba(0,0,0,.1), 0 12px 32px rgba(0,0,0,.2);
+  overflow: hidden;
+}
+
+/* The iframe LIVES INSIDE .pv-paper / #pvModal */
+#pvFrame {
+  width: 100%;
+  border: none;
+  display: block;
+  min-height: 300px;
+}
+
+.pv-hint {
+  margin-top: 10px;
+  font-size: 10.5px; color: #8896aa; font-style: italic;
+}
+
+/* Silent print iframe — completely hidden, out of flow */
+#pvPrintFrame {
+  position: fixed;
+  top: -9999px; left: -9999px;
+  width: 1px; height: 1px;
+  border: none; visibility: hidden;
+}
+</style>
+{% endblock %}
+
+
+{% block content %}
+
+{% if error %}
+<div class="ihomis-warn">
+  <i class="fas fa-triangle-exclamation"></i>
+  <span>{{ error }}</span>
+</div>
+{% endif %}
+
+<div class="dc-wrap">
+
+  <!-- ══ SIDEBAR: Patient Search ══════════════════════════════════════ -->
+  <div class="dc-sidebar">
+    <div class="sidebar-head">
+      <div class="sidebar-head-icon"><i class="fas fa-id-card-clip"></i></div>
+      <div class="sidebar-head-text">
+        <div class="sidebar-head-title">Patient Lookup</div>
+        <div class="sidebar-head-sub">Search via iHOMIS+</div>
+      </div>
+    </div>
+
+    <!-- Search input -->
+    <div class="patient-search-wrap">
+      <div class="patient-search-box">
+        <i class="fas fa-magnifying-glass search-icon"></i>
+        <input type="text" id="patSearchInput"
+               placeholder="Hospital No., last name, first name…"
+               oninput="debouncePatientSearch(this.value)"
+               onfocus="if(this.value.trim().length>=2) debouncePatientSearch(this.value)"
+               autocomplete="off">
+        <div class="patient-dropdown" id="patDropdown"></div>
+      </div>
+    </div>
+
+    <!-- Selected patient card -->
+    <div class="pat-selected-card {% if patient %}show{% endif %}" id="patSelectedCard">
+      <div class="pat-card-hn"  id="pcHN">{% if patient %}{{ patient.hospital_number }}{% endif %}</div>
+      <div class="pat-card-name" id="pcName">{% if patient %}{{ patient.full_name_formal }}{% endif %}</div>
+      <div class="pat-card-meta">
+        <span id="pcBday">{% if patient %}{% if patient.patbdate %}{{ patient.patbdate|date:"M d, Y" }}{% else %}—{% endif %}{% endif %}</span>
+        <span id="pcSex">{% if patient %}{{ patient.sex_display }}{% endif %}</span>
+        <br>
+        <span id="pcAddr">{% if patient %}{{ patient.address }}{% endif %}</span>
+      </div>
+      <div class="pat-card-phic" id="pcPhic"
+           style="display:{% if patient and patient.phicnum %}inline-flex{% else %}none{% endif %};">
+        <i class="fas fa-shield-heart"></i> PhilHealth: <span id="pcPhicNum">{% if patient %}{{ patient.phicnum }}{% endif %}</span>
+      </div>
+      <button class="btn-change-pat" onclick="clearPatient()">
+        <i class="fas fa-arrows-rotate"></i> Change Patient
+      </button>
+    </div>
+
+    <!-- Quick stats (shown after patient selected) -->
+    <div class="sidebar-stats" id="sidebarStats"
+         style="display:{% if stats %}grid{% else %}none{% endif %};">
+      <div class="ss-card">
+        <div class="ss-val" id="statTxns">{% if stats %}{{ stats.total_transactions }}{% else %}0{% endif %}</div>
+        <div class="ss-lbl">Transactions</div>
+      </div>
+      <div class="ss-card">
+        <div class="ss-val" id="statUnits">{% if stats %}{{ stats.total_units|default:"0" }}{% else %}0{% endif %}</div>
+        <div class="ss-lbl">Units Dispensed</div>
+      </div>
+      <div class="ss-card" style="grid-column:span 2;">
+        <div class="ss-val" id="statAmt" style="font-size:16px;">
+          ₱{% if stats %}{{ stats.total_amount|default:"0.00"|floatformat:2 }}{% else %}0.00{% endif %}
+        </div>
+        <div class="ss-lbl">Total Amount</div>
+      </div>
+    </div>
+
+    <!-- Empty hint -->
+    <div class="sidebar-empty" id="sidebarEmpty"
+         style="display:{% if patient %}none{% else %}block{% endif %};">
+      <i class="fas fa-hospital-user"></i>
+      <p>Search for a patient by hospital number or name to view their dispensing card.</p>
+    </div>
+  </div>
+
+  <!-- ══ MAIN: Dispensing Card Content ══════════════════════════════════ -->
+  <div class="dc-main">
+
+    <!-- Toolbar -->
+    <div class="dc-toolbar">
+      <div class="dc-toolbar-title">
+        <i class="fas fa-clipboard-list"></i>
+        <span id="toolbarTitle">
+          {% if patient %}Dispensing History — {{ patient.full_name }}{% else %}Dispensing History{% endif %}
+        </span>
+      </div>
+      <div class="filter-wrap">
+        <input type="date" id="filterFrom" onchange="filterTransactions()" title="From date">
+        <input type="date" id="filterTo"   onchange="filterTransactions()" title="To date">
+        <select id="filterRx" onchange="filterTransactions()">
+          <option value="">All Rx</option>
+        </select>
+      </div>
+      <button class="btn-print-card" id="btnPrintCard" onclick="printCard()"
+              {% if not patient %}disabled{% endif %}>
+        <i class="fas fa-print"></i> Print Card
+      </button>
+    </div>
+
+    <!-- Loading indicator -->
+    <div class="dc-loading" id="dcLoading">
+      <i class="fas fa-circle-notch spin"></i> Loading dispensing records…
+    </div>
+
+    <!-- Transaction list -->
+    <div class="txn-list" id="txnList">
+      {% if patient and transactions %}
+        {% for txn in transactions %}
+        <div class="txn-card" data-date="{{ txn.datetime_iso }}" data-rx="{{ txn.prescription_no }}">
+          <div class="txn-card-header" onclick="toggleTxn(this)">
+            <div class="txn-date-badge">
+              <div class="txn-day">{{ txn.date|slice:"8:10" }}</div>
+              <div class="txn-month">{{ txn.date|slice:":3" }}</div>
+              <div class="txn-year">{{ txn.date|slice:"-4:" }}</div>
+            </div>
+            <div class="txn-header-info">
+              <div class="txn-no">Txn #{{ txn.pk|stringformat:"05d" }}</div>
+              {% if txn.prescription_no != '—' %}
+              <div class="txn-rx"><i class="fas fa-file-prescription" style="color:#00ADB5;font-size:10px;"></i> Rx: {{ txn.prescription_no }}</div>
+              {% endif %}
+              {% if txn.doctor != '—' %}
+              <div class="txn-doctor"><i class="fas fa-user-doctor" style="font-size:10px;color:#94a3b8;"></i> {{ txn.doctor }}</div>
+              {% endif %}
+            </div>
+            <div class="txn-header-right">
+              <div class="txn-total">₱{{ txn.total|floatformat:2 }}</div>
+              <div class="txn-units">{{ txn.items|length }} item{{ txn.items|length|pluralize }}</div>
+            </div>
+            <i class="fas fa-chevron-down txn-expand-icon"></i>
+          </div>
+          <div class="txn-card-body">
+            <table class="med-table">
+              <thead>
+                <tr>
+                  <th>Medicine</th>
+                  <th>Form</th>
+                  <th style="text-align:center;">Qty</th>
+                  <th style="text-align:right;">Unit Price</th>
+                  <th style="text-align:right;">Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in txn.items %}
+                <tr>
+                  <td>
+                    <div class="med-name">
+                      {{ item.medicine_name }} {{ item.strength }}
+                      {% if item.is_s2 %}<span class="s2-badge"><i class="fas fa-shield-halved" style="font-size:8px;"></i> S2</span>{% endif %}
+                    </div>
+                    <div class="med-generic">{{ item.generic_name }}</div>
+                  </td>
+                  <td style="color:#64748b;font-size:12px;">{{ item.dosage_form }}</td>
+                  <td style="text-align:center;font-weight:700;">{{ item.quantity }}</td>
+                  <td style="text-align:right;">₱{{ item.unit_price|floatformat:2 }}</td>
+                  <td style="text-align:right;font-weight:700;">₱{{ item.subtotal|floatformat:2 }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            <div class="txn-footer-row">
+              {% if txn.pharmacist != '—' %}
+              <div class="pharmacist-chip">
+                <div class="pharmacist-chip-av">{{ txn.pharmacist|first|upper }}</div>
+                {{ txn.pharmacist }}
+              </div>
+              {% endif %}
+              <span class="lbl">Subtotal:</span><span class="val">₱{{ txn.subtotal|floatformat:2 }}</span>
+              {% if txn.discount > 0 %}
+              <span class="lbl">Discount:</span><span class="val">-₱{{ txn.discount|floatformat:2 }}</span>
+              {% endif %}
+              <span class="lbl">Total:</span><span class="grand">₱{{ txn.total|floatformat:2 }}</span>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      {% elif patient %}
+        <div class="dc-empty">
+          <i class="fas fa-pills"></i>
+          <h3>No Dispensing Records</h3>
+          <p>This patient has no dispensing transactions recorded yet.</p>
+        </div>
+      {% else %}
+        <div class="dc-empty" id="dcEmptyState">
+          <i class="fas fa-id-card-clip"></i>
+          <h3>Select a Patient</h3>
+          <p>Search for a patient on the left to view their complete dispensing card and history.</p>
+        </div>
+      {% endif %}
+    </div>
+
+  </div><!-- .dc-main -->
+</div><!-- .dc-wrap -->
+
+
+<!-- ══ PRINT PREVIEW MODAL ═══════════════════════════════════════════════
+     #pvBackdrop is the scroll container (position:fixed, full-viewport).
+     #pvModal sits inside it.
+     #pvFrame (the iframe) sits inside #pvModal → inside .pv-paper → inside .pv-tray.
+     This is the correct structure so the preview renders INSIDE the modal.
+     ════════════════════════════════════════════════════════════════════ -->
+<div id="pvBackdrop">
+  <div id="pvModal">
+
+    <!-- Header bar -->
+    <div class="pv-head">
+      <div class="pv-head-icon"><i class="fas fa-print"></i></div>
+      <div class="pv-head-text">
+        <div class="pv-head-title" id="pvTitle">Print Preview</div>
+        <div class="pv-head-sub"  id="pvSub">Patient Dispensing Card</div>
+      </div>
+      <div class="pv-filter-chip" id="pvChip">
+        <i class="fas fa-filter"></i>
+        <span id="pvChipLbl"></span>
+      </div>
+      <button class="btn-pv-print" onclick="pvDoPrint()">
+        <i class="fas fa-print"></i> Print
+      </button>
+      <button class="btn-pv-close" onclick="pvClose()" title="Close">
+        <i class="fas fa-xmark"></i>
+      </button>
+    </div>
+
+    <!-- Grey tray + A4 paper + iframe — all INSIDE the modal -->
+    <div class="pv-tray">
+      <div class="pv-loading" id="pvLoading">
+        <i class="fas fa-circle-notch fa-spin"></i>&nbsp; Rendering preview…
+      </div>
+      <div class="pv-paper" id="pvPaper" style="display:none;">
+        <!-- iframe is a child of .pv-paper which is inside #pvModal -->
+        <iframe id="pvFrame" title="Print Preview" onload="pvFrameLoaded()"></iframe>
+      </div>
+      <div class="pv-hint" id="pvHint" style="display:none;">
+        A4 · Portrait · Exactly what will be printed
+      </div>
+    </div>
+
+  </div><!-- #pvModal -->
+</div><!-- #pvBackdrop -->
+
+<!-- Hidden silent iframe used as print fallback -->
+<iframe id="pvPrintFrame" title="Silent print" onload="pvSilentLoaded()"></iframe>
+
+{% endblock %}
+
+
+{% block extra_js %}
+<script>
+// ── URL constants ────────────────────────────────────────────────────────────
+const PATIENT_SEARCH_URL = "{% url 'patient_search_ajax' %}";
+const CARD_DETAIL_BASE = '/dispensing/card/';
+
+// ── State ────────────────────────────────────────────────────────────────────
+let currentPatient = {% if patient %}{
+  hpatkey:          "{{ hpatkey }}",
+  hospital_number:  "{{ patient.hospital_number }}",
+  full_name:        "{{ patient.full_name }}",
+  full_name_formal: "{{ patient.full_name_formal }}",
+  birthdate:        "{% if patient.patbdate %}{{ patient.patbdate|date:'B d, Y' }}{% else %}—{% endif %}",
+  sex:              "{{ patient.sex_display }}",
+  address:          "{{ patient.address|escapejs }}",
+  phicnum:          "{{ patient.phicnum|default:'—' }}",
+  patmedno:         "{{ patient.patmedno|default:'—' }}",
+}{% else %}null{% endif %};
+
+let allTransactions = {% if transactions %}{{ transactions|safe }}{% else %}[]{% endif %};
+
+// ── Patient Search ─────────────────────────────────────────────────────────
+let patSearchTimer;
+function debouncePatientSearch(q) {
+  clearTimeout(patSearchTimer);
+  if (currentPatient) return;
+  const dd = document.getElementById('patDropdown');
+  if (!q.trim()) { dd.classList.remove('open'); return; }
+  if (q.trim().length < 2) { dd.classList.remove('open'); return; }
+  dd.innerHTML = '<div class="search-loading show"><i class="fas fa-circle-notch fa-spin" style="color:#00ADB5;"></i> Searching…</div>';
+  dd.classList.add('open');
+  patSearchTimer = setTimeout(() => fetchPatients(q), 320);
+}
+
+function fetchPatients(q) {
+  if (q.trim().length < 2) return;
+  fetch(PATIENT_SEARCH_URL + '?q=' + encodeURIComponent(q.trim()))
+    .then(r => r.json())
+    .then(d => renderPatDropdown(d.results || [], d.error))
+    .catch(() => {
+      const dd = document.getElementById('patDropdown');
+      dd.innerHTML = `<div class="dd-error"><i class="fas fa-triangle-exclamation"></i> Network error — could not reach iHOMIS+.</div>`;
+      dd.classList.add('open');
+    });
+}
+
+function renderPatDropdown(results, error) {
+  const dd = document.getElementById('patDropdown');
+  if (error) {
+    dd.innerHTML = `<div class="dd-error"><i class="fas fa-triangle-exclamation"></i> iHOMIS+ unavailable: ${escHtml(error)}</div>`;
+    dd.classList.add('open');
+    return;
+  }
+  if (!results.length) {
+    dd.innerHTML = `<div class="pat-option-empty"><i class="fas fa-user-slash"></i>No patients found.</div>`;
+    dd.classList.add('open');
+    return;
+  }
+  dd.innerHTML = results.map(p => `
+    <div class="pat-option" onclick="selectPatient(${JSON.stringify(p).replace(/"/g, '&quot;')})">
+      <div class="pat-option-hn">${escHtml(p.hospital_number)}</div>
+      <div class="pat-option-name">${escHtml(p.full_name_formal)}</div>
+      <div class="pat-option-sub">${escHtml(p.birthdate || '—')} · ${escHtml(p.sex || '—')}</div>
+    </div>`).join('');
+  dd.classList.add('open');
+}
+
+function selectPatient(p) {
+  currentPatient = p;
+  closePatDropdown();
+  document.getElementById('patSearchInput').value = '';
+
+  document.getElementById('pcHN').textContent   = p.hospital_number || '—';
+  document.getElementById('pcName').textContent  = p.full_name_formal || p.full_name || '—';
+  document.getElementById('pcBday').textContent  = p.birthdate || '—';
+  document.getElementById('pcSex').textContent   = p.sex || '—';
+  document.getElementById('pcAddr').textContent  = p.address || '—';
+
+  const phicEl  = document.getElementById('pcPhic');
+  const phicNum = document.getElementById('pcPhicNum');
+  if (p.phicnum && p.phicnum !== '—') {
+    phicNum.textContent  = p.phicnum;
+    phicEl.style.display = 'inline-flex';
+  } else {
+    phicEl.style.display = 'none';
+  }
+
+  document.getElementById('patSelectedCard').classList.add('show');
+  document.getElementById('sidebarEmpty').style.display = 'none';
+  loadCardDetail(p.hpatkey);
+}
+
+function clearPatient() {
+  currentPatient  = null;
+  allTransactions = [];
+  document.getElementById('patSearchInput').value           = '';
+  document.getElementById('patSelectedCard').classList.remove('show');
+  document.getElementById('sidebarEmpty').style.display     = 'block';
+  document.getElementById('sidebarStats').style.display     = 'none';
+  document.getElementById('toolbarTitle').textContent       = 'Dispensing History';
+  document.getElementById('btnPrintCard').disabled          = true;
+  document.getElementById('filterRx').innerHTML             = '<option value="">All Rx</option>';
+  renderEmptyState();
+}
+
+function closePatDropdown() {
+  document.getElementById('patDropdown').classList.remove('open');
+}
+
+document.addEventListener('click', function(e) {
+  const wrap = document.querySelector('.patient-search-box');
+  if (wrap && !wrap.contains(e.target)) closePatDropdown();
+});
+
+// ── Load Card Detail (AJAX) ──────────────────────────────────────────────────
+function loadCardDetail(hpatkey) {
+  const loading = document.getElementById('dcLoading');
+  const list    = document.getElementById('txnList');
+
+  list.style.display = 'none';
+  loading.classList.add('show');
+
+  const url = CARD_DETAIL_BASE + encodeURIComponent(String(hpatkey)) + '/';
+  console.log('[DispensingCard] Fetching:', url);
+
+  fetch(url, {
+    headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
+  })
+  .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+  .then(data => {
+    loading.classList.remove('show');
+    list.style.display = '';
+
+    if (data.error) {
+      list.innerHTML = `<div class="dc-empty">
+        <i class="fas fa-triangle-exclamation" style="color:#f59e0b;"></i>
+        <h3>Error</h3><p>${escHtml(data.error)}</p>
+      </div>`;
+      return;
+    }
+
+    allTransactions = data.transactions || [];
+    updateStats(data.stats || {});
+
+    const pat = data.patient || {};
+    document.getElementById('toolbarTitle').textContent =
+      'Dispensing History — ' + (pat.full_name || (currentPatient && currentPatient.full_name) || '');
+    document.getElementById('btnPrintCard').disabled = false;
+    buildRxFilter(allTransactions);
+
+    if (allTransactions.length === 0) {
+      list.innerHTML = `<div class="dc-empty">
+        <i class="fas fa-pills"></i>
+        <h3>No Dispensing Records</h3>
+        <p>This patient has no dispensing transactions on record yet.</p>
+      </div>`;
+    } else {
+      renderTxnList(allTransactions);
+    }
+  })
+  .catch(err => {
+    loading.classList.remove('show');
+    list.style.display = '';
+    list.innerHTML = `<div class="dc-empty">
+      <i class="fas fa-wifi" style="color:#f59e0b;"></i>
+      <h3>Network Error</h3><p>Could not load records: ${escHtml(err.message)}</p>
+    </div>`;
+  });
+}
+
+function updateStats(stats) {
+  document.getElementById('statTxns').textContent  = stats.total_transactions || 0;
+  document.getElementById('statUnits').textContent = stats.total_units || 0;
+  document.getElementById('statAmt').textContent   = '₱' + (parseFloat(stats.total_amount) || 0).toFixed(2);
+  document.getElementById('sidebarStats').style.display = 'grid';
+}
+
+function buildRxFilter(txns) {
+  const sel = document.getElementById('filterRx');
+  sel.innerHTML = '<option value="">All Rx</option>';
+  const rxSet = new Set();
+  txns.forEach(t => { if (t.prescription_no && t.prescription_no !== '—') rxSet.add(t.prescription_no); });
+  rxSet.forEach(rx => {
+    const opt = document.createElement('option');
+    opt.value = rx; opt.textContent = `Rx: ${rx}`;
+    sel.appendChild(opt);
+  });
+}
+
+// ── Filter ────────────────────────────────────────────────────────────────────
+function filterTransactions() {
+  const from = document.getElementById('filterFrom').value;
+  const to   = document.getElementById('filterTo').value;
+  const rx   = document.getElementById('filterRx').value;
+
+  let filtered = allTransactions;
+  if (from) filtered = filtered.filter(t => t.datetime_iso >= from);
+  if (to)   filtered = filtered.filter(t => t.datetime_iso.slice(0,10) <= to);
+  if (rx)   filtered = filtered.filter(t => t.prescription_no === rx);
+  renderTxnList(filtered);
+}
+
+// ── Render Transaction List ───────────────────────────────────────────────────
+function renderEmptyState() {
+  document.getElementById('txnList').innerHTML = `
+    <div class="dc-empty" id="dcEmptyState">
+      <i class="fas fa-id-card-clip"></i>
+      <h3>Select a Patient</h3>
+      <p>Search for a patient on the left to view their complete dispensing card and history.</p>
+    </div>`;
+}
+
+function renderTxnList(txns) {
+  const list = document.getElementById('txnList');
+  if (!txns || !txns.length) {
+    list.innerHTML = `<div class="dc-empty">
+      <i class="fas fa-pills"></i>
+      <h3>No Records Found</h3>
+      <p>No transactions match the selected filters.</p>
+    </div>`;
+    return;
+  }
+
+  list.innerHTML = txns.map(txn => {
+    const d     = new Date(txn.datetime_iso);
+    const day   = String(d.getDate()).padStart(2, '0');
+    const month = d.toLocaleString('en', {month: 'short'}).toUpperCase();
+    const year  = d.getFullYear();
+
+    const itemRows = txn.items.map(item => `
+      <tr>
+        <td>
+          <div class="med-name">${escHtml(item.medicine_name)} ${escHtml(item.strength || '')}
+            ${item.is_s2 ? '<span class="s2-badge"><i class="fas fa-shield-halved" style="font-size:8px;"></i> S2</span>' : ''}
+          </div>
+          <div class="med-generic">${escHtml(item.generic_name || '')}</div>
+        </td>
+        <td style="color:#64748b;font-size:12px;">${escHtml(item.dosage_form || '')}</td>
+        <td style="text-align:center;font-weight:700;">${item.quantity}</td>
+        <td style="text-align:right;">₱${parseFloat(item.unit_price || 0).toFixed(2)}</td>
+        <td style="text-align:right;font-weight:700;">₱${parseFloat(item.subtotal || 0).toFixed(2)}</td>
+      </tr>`).join('');
+
+    const discountRow = (txn.discount > 0)
+      ? `<span class="lbl">Discount:</span><span class="val">-₱${parseFloat(txn.discount).toFixed(2)}</span>` : '';
+    const pharmacistChip = (txn.pharmacist && txn.pharmacist !== '—')
+      ? `<div class="pharmacist-chip">
+           <div class="pharmacist-chip-av">${escHtml(txn.pharmacist[0].toUpperCase())}</div>
+           ${escHtml(txn.pharmacist)}
+         </div>` : '';
+
+    return `
+    <div class="txn-card" data-date="${txn.datetime_iso}" data-rx="${txn.prescription_no || ''}">
+      <div class="txn-card-header" onclick="toggleTxn(this)">
+        <div class="txn-date-badge">
+          <div class="txn-day">${day}</div>
+          <div class="txn-month">${month}</div>
+          <div class="txn-year">${year}</div>
+        </div>
+        <div class="txn-header-info">
+          <div class="txn-no">Txn #${String(txn.pk).padStart(5,'0')}</div>
+          ${txn.prescription_no && txn.prescription_no !== '—'
+            ? `<div class="txn-rx"><i class="fas fa-file-prescription" style="color:#00ADB5;font-size:10px;"></i> Rx: ${escHtml(txn.prescription_no)}</div>` : ''}
+          ${txn.doctor && txn.doctor !== '—'
+            ? `<div class="txn-doctor"><i class="fas fa-user-doctor" style="font-size:10px;color:#94a3b8;"></i> ${escHtml(txn.doctor)}</div>` : ''}
+        </div>
+        <div class="txn-header-right">
+          <div class="txn-total">₱${parseFloat(txn.total).toFixed(2)}</div>
+          <div class="txn-units">${txn.items.length} item${txn.items.length !== 1 ? 's' : ''}</div>
+        </div>
+        <i class="fas fa-chevron-down txn-expand-icon"></i>
+      </div>
+      <div class="txn-card-body">
+        <table class="med-table">
+          <thead>
+            <tr>
+              <th>Medicine</th><th>Form</th>
+              <th style="text-align:center;">Qty</th>
+              <th style="text-align:right;">Unit Price</th>
+              <th style="text-align:right;">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>${itemRows}</tbody>
+        </table>
+        <div class="txn-footer-row">
+          ${pharmacistChip}
+          <span class="lbl">Subtotal:</span><span class="val">₱${parseFloat(txn.subtotal).toFixed(2)}</span>
+          ${discountRow}
+          <span class="lbl">Total:</span><span class="grand">₱${parseFloat(txn.total).toFixed(2)}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleTxn(header) {
+  header.closest('.txn-card').classList.toggle('expanded');
+}
+
+// ── Print Card — opens preview modal ──────────────────────────────────────────
+function printCard() {
+  if (!currentPatient) return;
+
+  // Respect active filters
+  const from = document.getElementById('filterFrom').value;
+  const to   = document.getElementById('filterTo').value;
+  const rx   = document.getElementById('filterRx').value;
+  let txns   = allTransactions;
+  if (from) txns = txns.filter(t => t.datetime_iso >= from);
+  if (to)   txns = txns.filter(t => t.datetime_iso.slice(0,10) <= to);
+  if (rx)   txns = txns.filter(t => t.prescription_no === rx);
+
+  if (!txns.length) {
+    alert('No transactions to print. Try adjusting your filters.');
+    return;
+  }
+
+  pvOpen(txns);
+}
+
+// ── Preview Modal Logic ────────────────────────────────────────────────────────
+function pvOpen(txns) {
+  const backdrop = document.getElementById('pvBackdrop');
+  const frame    = document.getElementById('pvFrame');
+  const paper    = document.getElementById('pvPaper');
+  const loading  = document.getElementById('pvLoading');
+  const hint     = document.getElementById('pvHint');
+
+  // Header text
+  document.getElementById('pvTitle').textContent =
+    (currentPatient.full_name_formal || currentPatient.full_name) + ' — Dispensing Card';
+  document.getElementById('pvSub').textContent =
+    `${txns.length} transaction${txns.length !== 1 ? 's' : ''} · HN: ${currentPatient.hospital_number}`;
+
+  // Filter chip
+  const chip    = document.getElementById('pvChip');
+  const chipLbl = document.getElementById('pvChipLbl');
+  const from    = document.getElementById('filterFrom').value;
+  const to      = document.getElementById('filterTo').value;
+  const rx      = document.getElementById('filterRx').value;
+  if (from || to || rx) {
+    const parts = [];
+    if (from || to) parts.push(`${from || '…'} → ${to || 'today'}`);
+    if (rx) parts.push(`Rx ${rx}`);
+    chipLbl.textContent = parts.join(' · ');
+    chip.classList.add('show');
+  } else {
+    chip.classList.remove('show');
+  }
+
+  // Reset state: show loading, hide paper
+  loading.style.display = 'flex';
+  paper.style.display   = 'none';
+  hint.style.display    = 'none';
+  frame.style.height    = '300px';
+
+  // Lock background scroll
+  document.body.style.overflow = 'hidden';
+
+  // Open backdrop
+  backdrop.classList.add('open');
+  backdrop.scrollTop = 0;
+
+  // Inject the self-contained print document into the iframe via srcdoc.
+  // srcdoc keeps it same-origin so contentWindow.print() works in all browsers.
+  frame._txns  = txns;
+  frame.srcdoc = buildPrintDoc(txns, currentPatient);
+}
+
+function pvFrameLoaded() {
+  const frame   = document.getElementById('pvFrame');
+  const paper   = document.getElementById('pvPaper');
+  const loading = document.getElementById('pvLoading');
+  const hint    = document.getElementById('pvHint');
+
+  // Auto-size iframe to its content height — no internal scrollbar
+  try {
+    const h = frame.contentDocument.documentElement.scrollHeight;
+    frame.style.height = Math.max(h, 400) + 'px';
+  } catch(e) {
+    frame.style.height = '1123px'; // A4 height fallback
+  }
+
+  loading.style.display = 'none';
+  paper.style.display   = 'block';
+  hint.style.display    = 'block';
+}
+
+function pvClose() {
+  document.getElementById('pvBackdrop').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+// Close when clicking the backdrop (outside the modal box)
+document.getElementById('pvBackdrop').addEventListener('click', function(e) {
+  if (e.target === this) pvClose();
+});
+
+// Close on Escape
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') pvClose();
+});
+
+// ── Trigger browser print dialog ──────────────────────────────────────────────
+function pvDoPrint() {
+  const frame = document.getElementById('pvFrame');
+  try {
+    // Primary: print the preview iframe directly — only the card content prints
+    frame.contentWindow.focus();
+    frame.contentWindow.print();
+  } catch(e) {
+    // Fallback: write same HTML into a hidden iframe and print that
+    console.warn('[pvDoPrint] iframe.contentWindow.print() blocked, using silent fallback');
+    const silent = document.getElementById('pvPrintFrame');
+    silent._shouldPrint = true;
+    silent.srcdoc = buildPrintDoc(frame._txns || allTransactions, currentPatient);
+  }
+}
+
+// Called when the silent fallback iframe loads
+function pvSilentLoaded() {
+  const silent = document.getElementById('pvPrintFrame');
+  if (!silent._shouldPrint) return;
+  silent._shouldPrint = false;
+  setTimeout(function() {
+    try {
+      silent.contentWindow.focus();
+      silent.contentWindow.print();
+    } catch(err) {
+      alert('Your browser blocked printing. Please press Ctrl+P / Cmd+P manually.');
+    }
+  }, 350);
+}
+
+// ── Build self-contained print HTML document ──────────────────────────────────
+// All CSS is inlined — zero dependency on the parent page's stylesheets.
+// This is what makes colors, layout, and fonts reliably appear in print.
+function buildPrintDoc(txns, p) {
+  let rows       = '';
+  let grandTotal = 0;
+  let grandUnits = 0;
+
+  txns.forEach(function(txn) {
+    rows += `<tr class="gh">
+      <td colspan="7">
+        Txn #${String(txn.pk).padStart(5,'0')}
+        &nbsp;&bull;&nbsp; ${escHtml(txn.date)} ${escHtml(txn.time || '')}
+        &nbsp;&bull;&nbsp; ${txn.doctor && txn.doctor !== '—' ? escHtml(txn.doctor) : 'No physician on record'}
+        ${txn.prescription_no && txn.prescription_no !== '—'
+          ? '&nbsp;&bull;&nbsp; Rx: ' + escHtml(txn.prescription_no) : ''}
+      </td>
+    </tr>`;
+    txn.items.forEach(function(item, i) {
+      grandTotal += parseFloat(item.subtotal || 0);
+      grandUnits += parseFloat(item.quantity  || 0);
+      rows += `<tr>
+        <td>${i + 1}</td>
+        <td><strong>${escHtml(item.medicine_name)} ${escHtml(item.strength || '')}</strong>
+            ${item.is_s2 ? '<br><small style="color:#6d28d9;font-weight:700;">&#9650; S2 Regulated</small>' : ''}</td>
+        <td>${escHtml(item.generic_name || '')}</td>
+        <td class="c">${escHtml(item.dosage_form || '')}</td>
+        <td class="c b">${item.quantity}</td>
+      </tr>`;
+    });
+  });
+
+  const totalDiscount = txns.reduce((s,t) => s + (parseFloat(t.discount)||0), 0);
+  const netTotal      = txns.reduce((s,t) => s + (parseFloat(t.total)   ||0), 0);
+  const today         = new Date().toLocaleDateString('en-PH', {year:'numeric',month:'long',day:'numeric'});
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Dispensing Card</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:'Times New Roman',Times,serif;
+    font-size:10pt;color:#111;background:#fff;
+    padding:14mm 13mm;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  }
+  /* Hospital header */
+  .hh{display:flex;align-items:center;gap:14pt;border-bottom:2.5pt solid #0c1f3f;padding-bottom:8pt;margin-bottom:10pt}
+  .hl{width:56pt;height:56pt;border-radius:50%;background:#0c1f3f;display:flex;align-items:center;justify-content:center;flex-shrink:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .hl span{color:#fff;font-size:20pt;font-weight:900}
+  .hi{flex:1}
+  .hn{font-size:12pt;font-weight:700;text-transform:uppercase;letter-spacing:.4pt;color:#0c1f3f;line-height:1.25}
+  .hs{font-size:8pt;color:#555;margin-top:2pt}
+  .ht{display:inline-block;font-size:10pt;font-weight:700;text-transform:uppercase;letter-spacing:1.2pt;color:#0c1f3f;border-bottom:1pt solid #0c1f3f;padding-bottom:2pt;margin-top:3pt}
+  .hr{text-align:right;font-size:8pt;color:#555;line-height:1.9}
+  /* Patient grid */
+  .pg{display:grid;grid-template-columns:1fr 1fr;border:1pt solid #333;margin-bottom:9pt}
+  .pf{padding:5pt 8pt;border-right:1pt solid #bbb;border-bottom:1pt solid #bbb}
+  .pf:nth-child(even){border-right:none}
+  .pf:nth-last-child(-n+2){border-bottom:none}
+  .pf.s2{grid-column:span 2;border-right:none}
+  .lbl{display:block;font-family:Arial,sans-serif;font-size:6.5pt;font-weight:700;text-transform:uppercase;letter-spacing:.6pt;color:#666;margin-bottom:1.5pt}
+  .val{font-size:10pt;font-weight:700;color:#000}
+  /* Table */
+  .tt{background:#0c1f3f;color:#fff;padding:5pt 8pt;font-family:Arial,sans-serif;font-size:8pt;font-weight:700;text-transform:uppercase;letter-spacing:.8pt;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  table{width:100%;border-collapse:collapse;border:1pt solid #333;margin-bottom:9pt}
+  thead tr{background:#e8eef4;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  thead th{border:1pt solid #999;padding:5pt 6pt;font-family:Arial,sans-serif;font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:.3pt;text-align:left}
+  tbody td{border:1pt solid #ccc;padding:5pt 6pt;font-size:9pt;vertical-align:top}
+  tbody tr:nth-child(even) td{background:#f8f8f8;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  tfoot td{border:1pt solid #999;padding:5pt 6pt;font-size:9pt;font-weight:700;background:#e8eef4;font-family:Arial,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .gh td{background:#ddf0f2!important;font-family:Arial,sans-serif;font-size:8pt;font-weight:700;color:#0c1f3f;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .c{text-align:center}.r{text-align:right}.b{font-weight:700}
+  /* Summary */
+  .sm{display:flex;justify-content:flex-end;margin-bottom:11pt}
+  .sb{border:1pt solid #333;width:195pt}
+  .sr{display:flex;justify-content:space-between;padding:4pt 8pt;border-bottom:1pt solid #ddd;font-size:9pt}
+  .sr:last-child{border-bottom:none;font-weight:700;background:#0c1f3f;color:#fff;font-family:Arial,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  /* Signatures */
+  .sg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:22pt;margin-top:18pt}
+  .si{text-align:center}
+  .sl{border-bottom:1pt solid #000;height:30pt;margin-bottom:4pt}
+  .sk{font-family:Arial,sans-serif;font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:.3pt}
+  .ss{font-size:7pt;color:#555;margin-top:1.5pt}
+  /* Footer */
+  .ft{margin-top:13pt;border-top:1pt solid #ccc;padding-top:5pt;display:flex;justify-content:space-between;font-size:7pt;color:#888;font-family:Arial,sans-serif}
+  @media print{body{padding:0}@page{size:A4 portrait;margin:14mm 12mm}}
+</style>
+</head>
+<body>
+
+<div class="hh">
+  <div><img src="/static/img/mharsmc.png" style="height:56pt;width:auto;object-fit:contain;"></div>
+  <div class="hi">
+    <div class="hn">Mayor Hilarion A. Ramiro Sr. Medical Center</div>
+    <div class="hs">Pharmacy Department &nbsp;&middot;&nbsp; Electronic Pharmacy Inventory System (ePIS)</div>
+    <div class="ht">Patient Dispensing Card</div>
+  </div>
+  <div class="hr">
+    Hospital No.: <strong>${escHtml(p.hospital_number)}</strong><br>
+    Printed: ${today}
+  </div>
+</div>
+
+<div class="pg">
+  <div class="pf s2">
+    <span class="lbl">Patient Full Name</span>
+    <span class="val" style="font-size:12pt">${escHtml(p.full_name_formal)}</span>
+  </div>
+  <div class="pf">
+    <span class="lbl">Hospital Number</span>
+    <span class="val">${escHtml(p.hospital_number)}</span>
+  </div>
+  <div class="pf">
+    <span class="lbl">Date of Birth</span>
+    <span class="val">${escHtml(p.birthdate)}</span>
+  </div>
+  <div class="pf">
+    <span class="lbl">Sex</span>
+    <span class="val">${escHtml(p.sex)}</span>
+  </div>
+</div>
+
+<div class="tt">Medicines Dispensed &mdash; ${txns.length} Transaction${txns.length!==1?'s':''}</div>
+<table>
+  <thead>
+    <tr>
+      <th style="width:22pt">#</th>
+      <th>Medicine Name / Strength</th>
+      <th>Generic Name</th>
+      <th style="width:58pt;text-align:center">Form</th>
+      <th style="width:34pt;text-align:center">Qty</th>
+    </tr>
+  </thead>
+  <tbody>${rows}</tbody>
+  <tfoot>
+    <tr>
+      <td colspan="4" style="text-align:right;font-size:8pt;color:#444">
+        Total transactions: ${txns.length}
+      </td>
+      <td class="c" style="font-size:8pt;color:#444">${grandUnits}</td>
+    </tr>
+  </tfoot>
+</table>
+
+<div class="ft">
+  <span>This document is generated with MHARSMC ePIS.</span>
+  <span>Printed: ${today}</span>
+</div>
+
+</body>
+</html>`;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g,  '&amp;')
+    .replace(/</g,  '&lt;')
+    .replace(/>/g,  '&gt;')
+    .replace(/"/g,  '&quot;')
+    .replace(/'/g,  '&#39;');
+}
+</script>
+{% endblock %}

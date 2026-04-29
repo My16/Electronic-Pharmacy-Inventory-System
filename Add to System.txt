@@ -1,0 +1,16 @@
+Add Module for doctors
+Regulated drugs need S2 License
+Doctor Should have S2 License with Expiration date
+condition if expired do not dispense
+
+
+Add Consumption Report
+
+
+
+try to add a feature to have a dispensing card.
+this will be searchable and printable
+
+
+
+Role base Modules

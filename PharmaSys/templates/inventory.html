@@ -320,7 +320,14 @@ select.form-control{cursor:pointer}
             <tr class="med-row {% if highlight_pk == m.pk|stringformat:'s' %}highlight-row{% endif %}" id="row-{{ m.pk }}">
                 <td style="color:#b0bec5;font-size:11.5px;">{{ page_obj.start_index|add:forloop.counter0 }}</td>
                 <td>
-                    <div class="med-name">{{ m.medicine_name }}</div>
+                    <div class="med-name">
+                        {{ m.medicine_name }}
+                        {% if m.is_s2_regulated %}
+                        <span style="display:inline-flex;align-items:center;gap:3px;background:rgba(139,92,246,.1);color:#7c3aed;border:1px solid rgba(139,92,246,.2);border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:5px;vertical-align:middle;">
+                            <i class="fas fa-shield-halved" style="font-size:9px;"></i> S2
+                        </span>
+                        {% endif %}
+                    </div>
                     <div class="med-sub">{{ m.generic_name }}{% if m.brand_name %} · {{ m.brand_name }}{% endif %} · {{ m.strength }}</div>
                 </td>
                 <td style="color:#64748b;">{{ m.category.name|default:"—" }}</td>
@@ -382,6 +389,7 @@ select.form-control{cursor:pointer}
                             data-selling_price="{{ m.selling_price }}"
                             data-reorder_level="{{ m.reorder_level }}"
                             data-storage_location="{{ m.storage_location|default:'' }}"
+                            data-is_s2_regulated="{{ m.is_s2_regulated|yesno:'true,false' }}"
                             onclick="openEditModal(this)">
                             <i class="fas fa-pen-to-square"></i>
                         </button>
@@ -522,6 +530,17 @@ select.form-control{cursor:pointer}
                     <div class="form-group"><label class="form-label">Reorder Level</label><input type="number" name="reorder_level" class="form-control" min="0" value="10"></div>
                     <div class="form-group"><label class="form-label">Barcode</label><input type="text" name="barcode" id="add_barcode" class="form-control"></div>
                     <div class="form-group"><label class="form-label">Storage Location</label><input type="text" name="storage_location" class="form-control"></div>
+                    <div class="form-group" style="grid-column:span 2;">
+                        <label class="form-label">S2 Regulation</label>
+                        <label style="display:flex;align-items:center;gap:10px;background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.18);border-radius:9px;padding:10px 14px;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='rgba(139,92,246,.1)'" onmouseout="this.style.background='rgba(139,92,246,.06)'">
+                            <input type="checkbox" name="is_s2_regulated" value="1" id="add_is_s2"
+                                   style="width:16px;height:16px;accent-color:#7c3aed;cursor:pointer;flex-shrink:0;">
+                            <span style="display:flex;flex-direction:column;gap:2px;">
+                                <span style="font-size:12.5px;font-weight:600;color:#1a2433;">S2 Regulated Medicine</span>
+                                <span style="font-size:11px;color:#78909c;">Requires a valid S2 license from the prescribing doctor when dispensing</span>
+                            </span>
+                        </label>
+                    </div>
                 </div>
 
                 <div class="section-label">Initial Stock (Optional)</div>
@@ -582,6 +601,17 @@ select.form-control{cursor:pointer}
                     <div class="form-group"><label class="form-label">Reorder Level</label><input type="number" name="reorder_level" id="e_reorder_level" class="form-control" min="0"></div>
                     <div class="form-group"><label class="form-label">Barcode</label><input type="text" name="barcode" id="e_barcode" class="form-control"></div>
                     <div class="form-group"><label class="form-label">Storage Location</label><input type="text" name="storage_location" id="e_storage_location" class="form-control"></div>
+                    <div class="form-group" style="grid-column:span 2;">
+                        <label class="form-label">S2 Regulation</label>
+                        <label style="display:flex;align-items:center;gap:10px;background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.18);border-radius:9px;padding:10px 14px;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='rgba(139,92,246,.1)'" onmouseout="this.style.background='rgba(139,92,246,.06)'">
+                            <input type="checkbox" name="is_s2_regulated" value="1" id="e_is_s2"
+                                   style="width:16px;height:16px;accent-color:#7c3aed;cursor:pointer;flex-shrink:0;">
+                            <span style="display:flex;flex-direction:column;gap:2px;">
+                                <span style="font-size:12.5px;font-weight:600;color:#1a2433;">S2 Regulated Medicine</span>
+                                <span style="font-size:11px;color:#78909c;">Requires a valid S2 license from the prescribing doctor when dispensing</span>
+                            </span>
+                        </label>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -673,6 +703,9 @@ function openEditModal(btn) {
 
     // Fill supplier select
     document.getElementById('e_supplier').value = btn.getAttribute('data-supplier') || '';
+
+    // S2 checkbox
+    document.getElementById('e_is_s2').checked = btn.getAttribute('data-is_s2_regulated') === 'true';
 
     // Fill category picker
     var catPk   = btn.getAttribute('data-category-pk')   || '';

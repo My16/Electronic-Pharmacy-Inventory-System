@@ -67,6 +67,7 @@
                 <th>#</th>
                 <th>User</th>
                 <th>Email</th>
+                <th>Position</th>
                 <th>Role</th>
                 <th>Status</th>
                 <th>Date Joined</th>
@@ -101,6 +102,9 @@
                 <!-- Email -->
                 <td style="color:#64748b;">{{ u.email|default:"—" }}</td>
 
+                <!-- Position -->
+                <td style="color:#64748b;">{{ u.profile.position|default:"—" }}</td>
+
                 <!-- Role -->
                 <td>
                     {% with role=u.profile.role %}
@@ -114,7 +118,7 @@
                     {% endwith %}
                 </td>
 
-                <!-- Status — badge only, no extra button here -->
+                <!-- Status -->
                 <td>
                     <span class="status-badge {% if u.is_active %}active{% else %}inactive{% endif %}">
                         <span class="status-dot"></span>
@@ -140,8 +144,10 @@
                                 data-last="{{ u.last_name|escapejs }}"
                                 data-email="{{ u.email|escapejs }}"
                                 data-username="{{ u.username|escapejs }}"
+                                data-position="{{ u.profile.position|escapejs }}"
                                 data-role="{{ u.profile.role }}"
                                 data-is-active="{{ u.is_active|yesno:'true,false' }}"
+                                data-perms="{{ u.permissions.inventory|yesno:'1,0' }},{{ u.permissions.stock_management|yesno:'1,0' }},{{ u.permissions.dispensing|yesno:'1,0' }},{{ u.permissions.dispensing_card|yesno:'1,0' }},{{ u.permissions.doctors|yesno:'1,0' }},{{ u.permissions.suppliers|yesno:'1,0' }},{{ u.permissions.reports|yesno:'1,0' }},{{ u.permissions.consumption_report|yesno:'1,0' }}"
                                 onclick="openEditModal(this)">
                             <i class="fas fa-pen-to-square"></i>
                         </button>
@@ -182,7 +188,7 @@
             </tr>
             {% empty %}
             <tr>
-                <td colspan="7">
+                <td colspan="8">
                     <div class="empty-state">
                         <i class="fas fa-users-slash"></i>
                         <p>No users found{% if search_query %} for "<strong>{{ search_query }}</strong>"{% endif %}.</p>
@@ -226,6 +232,12 @@
                     <input type="text" name="middle_name" class="form-control" placeholder="Santos">
                 </div>
 
+                <!-- Position -->
+                <div class="form-group">
+                    <label class="form-label">Position / Designation <span style="color:#b0bec5; font-weight:400;">(optional)</span></label>
+                    <input type="text" name="position" class="form-control" placeholder="Pharmacist, Cashier, etc.">
+                </div>
+
                 <!-- Username -->
                 <div class="form-group">
                     <label class="form-label">Username <span style="color:#dc2626;">*</span></label>
@@ -259,11 +271,40 @@
                 <!-- Role -->
                 <div class="form-group">
                     <label class="form-label">Role</label>
-                    <select name="role" class="form-control">
+                    <select name="role" id="add_role" class="form-control"
+                            onchange="handleAddRoleChange(this.value)">
                         <option value="user">User</option>
                         <option value="staff">Staff</option>
                         <option value="admin">Administrator</option>
                     </select>
+                </div>
+
+                <!-- Module Permissions (Add Modal) -->
+                <div id="add-perm-section" style="margin-top:8px;">
+                    <label class="form-label" style="text-transform:uppercase;
+                           font-size:11px; letter-spacing:.5px; color:#90a4ae;">
+                        Module Access
+                    </label>
+                    <div id="add-perm-checkboxes" style="display:grid;
+                         grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                        {% for module_key, module_label in module_choices %}
+                        <label style="display:flex; align-items:center; gap:8px;
+                                      padding:8px 12px;
+                                      border:1px solid var(--border, #e2e8f0);
+                                      border-radius:8px; cursor:pointer;
+                                      font-size:13px; font-weight:400;">
+                            <input type="checkbox"
+                                   name="perm_{{ module_key }}"
+                                   class="add-perm-checkbox">
+                            {{ module_label }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                    <p id="add-perm-admin-note" style="display:none; font-size:13px;
+                       color:#90a4ae; padding:8px 0; margin:0;">
+                        <i class="fas fa-shield-halved" style="margin-right:4px;"></i>
+                        Administrators have full access to all modules automatically.
+                    </p>
                 </div>
 
             </div>
@@ -308,6 +349,11 @@
                 </div>
 
                 <div class="form-group">
+                    <label class="form-label">Position / Designation <span style="color:#b0bec5; font-weight:400;">(optional)</span></label>
+                    <input type="text" name="position" id="edit_position" class="form-control" placeholder="Pharmacist, Cashier, etc.">
+                </div>
+
+                <div class="form-group">
                     <label class="form-label">Username</label>
                     <input type="text" id="edit_username" class="form-control" disabled
                            style="background:#f0f4f8; color:#90a4ae; cursor:not-allowed;">
@@ -329,7 +375,8 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">Role</label>
-                        <select name="role" id="edit_role" class="form-control">
+                        <select name="role" id="edit_role" class="form-control"
+                                onchange="handleRoleChange(this.value)">
                             <option value="user">User</option>
                             <option value="staff">Staff</option>
                             <option value="admin">Administrator</option>
@@ -341,6 +388,35 @@
                             Active Account
                         </label>
                     </div>
+                </div>
+
+                <!-- Module Permissions (Edit Modal) -->
+                <div id="perm-section" style="margin-top:8px;">
+                    <label class="form-label" style="text-transform:uppercase;
+                           font-size:11px; letter-spacing:.5px; color:#90a4ae;">
+                        Module Access
+                    </label>
+                    <div id="perm-checkboxes" style="display:grid;
+                         grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                        {% for module_key, module_label in module_choices %}
+                        <label style="display:flex; align-items:center; gap:8px;
+                                      padding:8px 12px;
+                                      border:1px solid var(--border, #e2e8f0);
+                                      border-radius:8px; cursor:pointer;
+                                      font-size:13px; font-weight:400;">
+                            <input type="checkbox"
+                                   name="perm_{{ module_key }}"
+                                   class="perm-checkbox"
+                                   data-module="{{ module_key }}">
+                            {{ module_label }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                    <p id="perm-admin-note" style="display:none; font-size:13px;
+                       color:#90a4ae; padding:8px 0; margin:0;">
+                        <i class="fas fa-shield-halved" style="margin-right:4px;"></i>
+                        Administrators have full access to all modules automatically.
+                    </p>
                 </div>
 
             </div>
@@ -397,7 +473,7 @@
         user_toggle: "{% url 'user_toggle_active' pk=0 %}".replace('/0/', '/'),
     };
 
-    // ── Modal helpers ────────────────────────────────────────────
+    // ── Modal helpers ─────────────────────────────────────────────
     function openModal(id)  { document.getElementById(id).classList.add('open'); }
     function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
@@ -407,8 +483,26 @@
         });
     });
 
-    // ── Add Modal ────────────────────────────────────────────────
-    function openAddModal() { openModal('addModal'); }
+    // ── Add Modal ─────────────────────────────────────────────────
+    function openAddModal() {
+        // Reset role and checkboxes every time
+        document.getElementById('add_role').value = 'user';
+        handleAddRoleChange('user');
+        document.querySelectorAll('.add-perm-checkbox').forEach(cb => cb.checked = false);
+        openModal('addModal');
+    }
+
+    function handleAddRoleChange(role) {
+        const checkboxes = document.getElementById('add-perm-checkboxes');
+        const adminNote  = document.getElementById('add-perm-admin-note');
+        if (role === 'admin') {
+            checkboxes.style.display = 'none';
+            adminNote.style.display  = 'block';
+        } else {
+            checkboxes.style.display = 'grid';
+            adminNote.style.display  = 'none';
+        }
+    }
 
     // Password match check for Add modal
     function checkAddMatch() {
@@ -425,39 +519,64 @@
         }
     }
 
-    // ── Edit Modal ───────────────────────────────────────────────
+    // ── Edit Modal ────────────────────────────────────────────────
     function openEditModal(btn) {
         const pk       = btn.dataset.pk;
+        const role     = btn.dataset.role;
         const isActive = btn.dataset.isActive === 'true';
 
-        document.getElementById('editForm').action            = URLS.user_edit + pk + '/';
-        document.getElementById('edit_first_name').value      = btn.dataset.first;
-        document.getElementById('edit_middle_name').value     = btn.dataset.middle;
-        document.getElementById('edit_last_name').value       = btn.dataset.last;
-        document.getElementById('edit_email').value           = btn.dataset.email;
-        document.getElementById('edit_username').value        = btn.dataset.username;
-        document.getElementById('edit_role').value            = btn.dataset.role;
-        document.getElementById('edit_is_active').checked     = isActive;
+        document.getElementById('editForm').action         = URLS.user_edit + pk + '/';
+        document.getElementById('edit_first_name').value  = btn.dataset.first;
+        document.getElementById('edit_middle_name').value = btn.dataset.middle;
+        document.getElementById('edit_last_name').value   = btn.dataset.last;
+        document.getElementById('edit_email').value       = btn.dataset.email;
+        document.getElementById('edit_username').value    = btn.dataset.username;
+        document.getElementById('edit_position').value    = btn.dataset.position;
+        document.getElementById('edit_role').value        = role;
+        document.getElementById('edit_is_active').checked = isActive;
+
+        // Load permission checkboxes
+        // Order: inventory, stock_management, dispensing, dispensing_card,
+        //        doctors, suppliers, reports, consumption_report
+        const perms   = (btn.dataset.perms || '').split(',');
+        const modules = [
+            'inventory', 'stock_management', 'dispensing', 'dispensing_card',
+            'doctors', 'suppliers', 'reports', 'consumption_report'
+        ];
+        modules.forEach((mod, i) => {
+            const cb = document.querySelector(`input[name="perm_${mod}"]`);
+            if (cb) cb.checked = perms[i] === '1';
+        });
+
+        // Show/hide checklist based on role
+        handleRoleChange(role);
 
         openModal('editModal');
     }
 
-    // ── Delete Modal ─────────────────────────────────────────────
+    function handleRoleChange(role) {
+        const checkboxes = document.getElementById('perm-checkboxes');
+        const adminNote  = document.getElementById('perm-admin-note');
+        if (role === 'admin') {
+            checkboxes.style.display = 'none';
+            adminNote.style.display  = 'block';
+        } else {
+            checkboxes.style.display = 'grid';
+            adminNote.style.display  = 'none';
+        }
+    }
+
+    // ── Delete Modal ──────────────────────────────────────────────
     function openDeleteModal(btn) {
         document.getElementById('deleteForm').action          = URLS.user_delete + btn.dataset.pk + '/';
         document.getElementById('deleteUserName').textContent = btn.dataset.name;
         openModal('deleteModal');
     }
 
-    // ── Toggle Active (AJAX) ─────────────────────────────────────
+    // ── Toggle Active (AJAX) ──────────────────────────────────────
     function toggleUser(btn) {
-        const pk   = btn.dataset.pk;
-        const name = btn.dataset.name;
-
-        // Disable button immediately to prevent double-click
         btn.disabled = true;
-
-        fetch(URLS.user_toggle + pk + '/', {
+        fetch(URLS.user_toggle + btn.dataset.pk + '/', {
             method: 'POST',
             headers: {
                 'X-CSRFToken': '{{ csrf_token }}',
@@ -468,11 +587,9 @@
         .then(data => {
             if (data.success) {
                 showToast(data.message, 'success');
-                // Update button and badge in-place without full reload
                 const row        = btn.closest('tr');
                 const statusCell = row.querySelector('.status-badge');
                 const toggleIcon = btn.querySelector('i');
-
                 if (data.is_active) {
                     statusCell.className = 'status-badge active';
                     statusCell.innerHTML = '<span class="status-dot"></span> Active';
@@ -500,7 +617,7 @@
         });
     }
 
-    // ── Toast ────────────────────────────────────────────────────
+    // ── Toast ─────────────────────────────────────────────────────
     function showToast(msg, type = 'success') {
         const toast = document.getElementById('toast');
         const icon  = toast.querySelector('i');
@@ -511,7 +628,7 @@
         setTimeout(() => toast.classList.remove('show'), 3000);
     }
 
-    // ── Auto-show Django messages as toast ───────────────────────
+    // ── Auto-show Django messages as toast ────────────────────────
     {% if messages %}
         {% for message in messages %}
             showToast("{{ message|escapejs }}", "{% if 'error' in message.tags %}error{% else %}success{% endif %}");

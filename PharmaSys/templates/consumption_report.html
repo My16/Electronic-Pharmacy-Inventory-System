@@ -1,0 +1,533 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}ePIS — Monthly Consumption Report{% endblock %}
+{% block page_title %}Consumption Report{% endblock %}
+{% block breadcrumb %}Consumption Report{% endblock %}
+{% block nav_consumption_report %}active{% endblock %}
+
+{% block extra_css %}
+<style>
+/* ═══════════════════════════════════════════════════════════
+   CONSUMPTION REPORT — Screen styles
+═══════════════════════════════════════════════════════════ */
+
+.cr-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.06);
+}
+
+.cr-controls label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #475569;
+}
+
+.cr-controls select {
+    padding: 8px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 13px;
+    font-family: 'Poppins', sans-serif;
+    color: #1e293b;
+    background: #f8fafc;
+    cursor: pointer;
+    outline: none;
+    transition: border-color .2s;
+}
+.cr-controls select:focus { border-color: #3b82f6; }
+
+.cr-controls .btn-generate {
+    padding: 8px 20px;
+    background: #1d4ed8;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: 'Poppins', sans-serif;
+    cursor: pointer;
+    transition: background .2s;
+}
+.cr-controls .btn-generate:hover { background: #1e40af; }
+
+.cr-controls .btn-print {
+    padding: 8px 20px;
+    background: #fff;
+    color: #1d4ed8;
+    border: 2px solid #1d4ed8;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: 'Poppins', sans-serif;
+    cursor: pointer;
+    transition: all .2s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.cr-controls .btn-print:hover { background: #eff6ff; }
+
+.cr-controls .spacer { flex: 1; }
+
+/* ── Summary badges ───────────────────────────────── */
+.cr-summary {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+.cr-badge {
+    flex: 1;
+    min-width: 140px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 14px 18px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.05);
+}
+.cr-badge-label { font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: .5px; }
+.cr-badge-value { font-size: 22px; font-weight: 700; color: #1e293b; margin-top: 4px; }
+.cr-badge.blue .cr-badge-value  { color: #1d4ed8; }
+.cr-badge.green .cr-badge-value { color: #16a34a; }
+.cr-badge.red .cr-badge-value   { color: #dc2626; }
+
+/* ── Table wrapper ────────────────────────────────── */
+.cr-table-wrap {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,.06);
+}
+
+.cr-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    font-family: 'Poppins', sans-serif;
+}
+
+.cr-table thead tr {
+    background: #1e3a5f;
+    color: #fff;
+}
+.cr-table thead th {
+    padding: 11px 14px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 11.5px;
+    letter-spacing: .3px;
+    white-space: nowrap;
+}
+.cr-table thead th.num { text-align: right; }
+
+.cr-table tbody tr { border-bottom: 1px solid #f1f5f9; }
+.cr-table tbody tr:last-child { border-bottom: none; }
+.cr-table tbody tr:nth-child(even) { background: #f8fafc; }
+.cr-table tbody tr:hover { background: #eff6ff; }
+
+.cr-table td {
+    padding: 9px 14px;
+    color: #334155;
+    vertical-align: middle;
+}
+.cr-table td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+}
+.cr-table td.item-code {
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: #64748b;
+}
+.cr-table td.desc {
+    font-weight: 500;
+    color: #1e293b;
+    max-width: 280px;
+}
+.cr-table td.uom {
+    text-transform: capitalize;
+    color: #64748b;
+    font-size: 12px;
+}
+
+/* zero highlight */
+.zero { color: #94a3b8; }
+/* negative balance */
+.negative { color: #dc2626; font-weight: 600; }
+
+/* ── Empty state ──────────────────────────────────── */
+.cr-empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: #94a3b8;
+}
+.cr-empty i { font-size: 40px; margin-bottom: 12px; display: block; }
+.cr-empty p { font-size: 14px; }
+
+
+/* ═══════════════════════════════════════════════════════════
+   PRINT STYLES  — mimics the physical DOH form
+═══════════════════════════════════════════════════════════ */
+@media screen {
+    /* Hide the printable sheet completely on screen */
+    #printable { display: none !important; }
+}
+
+@media print {
+    /* Hide ALL screen UI, show only the print sheet */
+    .sidebar,
+    .main-header,
+    .main-footer,
+    .cr-controls,
+    .cr-summary,
+    .cr-table-wrap,
+    .cr-empty,
+    .alert {
+        display: none !important;
+    }
+
+    #printable {
+        display: block !important;
+    }
+
+    .main-wrapper {
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    .main-content {
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    /* Reset page */
+    @page {
+        size: legal landscape;
+        margin: 10mm 12mm;
+    }
+
+    /* ── Print header ── */
+    .print-header {
+        margin-bottom: 8px;
+    }
+    .ph-form-no {
+        text-align: right;
+        font-size: 8pt;
+        margin-bottom: 4px;
+    }
+    .ph-header-row {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 28px;
+    }
+    .ph-logo-left,
+    .ph-logo-right {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .ph-logo-left img,
+    .ph-logo-right img {
+        width: 100px;
+        height: 100px;
+        object-fit: contain;
+    }
+    .ph-header-center {
+        flex: 0 1 520px;
+        max-width: 620px;
+        text-align: center;
+    }
+    .print-header .ph-republic {
+        font-size: 9pt;
+    }
+    .print-header .ph-dept {
+        font-size: 9pt;
+    }
+    .print-header .ph-hospital {
+        font-size: 13pt;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+    .print-header .ph-city {
+        font-size: 9pt;
+    }
+    .print-header .ph-title {
+        font-size: 11pt;
+        font-weight: 700;
+        margin-top: 6px;
+    }
+    .print-header .ph-period {
+        font-size: 10pt;
+        font-weight: 600;
+    }
+    .print-header .ph-unit {
+        font-size: 9pt;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-top: 2px;
+    }
+
+    /* ── Print table ── */
+    .print-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 8.5pt;
+        font-family: Arial, sans-serif;
+        margin-top: 8px;
+    }
+    .print-table th, .print-table td {
+        border: 1px solid #000;
+        padding: 3px 5px;
+        vertical-align: middle;
+    }
+    .print-table thead th {
+        text-align: center;
+        font-weight: 700;
+        background: #d0d0d0;
+        font-size: 8pt;
+    }
+    .print-table tbody td { font-size: 8pt; }
+    .print-table tbody td.num  { text-align: right; }
+    .print-table tbody td.code { font-family: 'Courier New', monospace; font-size: 7.5pt; }
+    .print-table tfoot td {
+        border: 1px solid #000;
+        font-size: 8pt;
+        font-weight: 600;
+    }
+
+    /* ── Print signatures ── */
+    .print-signatures {
+        display: flex;
+        justify-content: center;
+        gap: 500px;
+        margin-top: 18px;
+        font-size: 9pt;
+        font-family: Arial, sans-serif;
+    }
+    .sig-block { text-align: center; }
+    .sig-label { font-weight: 700; font-size: 9pt; margin-bottom: 16px; }
+    .sig-line {
+        border-bottom: 1px solid #000;
+        min-width: 160px;
+        margin: 0 auto 10px;
+        height: 30px;
+    }
+    .sig-user { 
+        font-size: 9pt; margin-bottom: 2px; text-decoration: underline; text-underline-offset: 4px;
+    }
+    .sig-title { font-size: 8pt; }
+}
+</style>
+{% endblock %}
+
+
+{% block content %}
+
+<!-- ── Controls ───────────────────────────────────────────────────────────── -->
+<form method="get" id="cr-form">
+<div class="cr-controls">
+
+    <label for="cr-month">Month</label>
+    <select name="month" id="cr-month">
+        {% for num, name in month_choices %}
+        <option value="{{ num }}" {% if num == selected_month %}selected{% endif %}>{{ name }}</option>
+        {% endfor %}
+    </select>
+
+    <label for="cr-year">Year</label>
+    <select name="year" id="cr-year">
+        {% for y in year_choices %}
+        <option value="{{ y }}" {% if y == selected_year %}selected{% endif %}>{{ y }}</option>
+        {% endfor %}
+    </select>
+
+    <button type="submit" class="btn-generate">
+        <i class="fas fa-magnifying-glass"></i> Generate
+    </button>
+
+    <div class="spacer"></div>
+
+    <button type="button" class="btn-print" onclick="window.print()">
+        <i class="fas fa-print"></i> Print
+    </button>
+
+</div>
+</form>
+
+<!-- ── Summary Badges ─────────────────────────────────────────────────────── -->
+{% if rows %}
+<div class="cr-summary">
+    <div class="cr-badge">
+        <div class="cr-badge-label">Total Items</div>
+        <div class="cr-badge-value">{{ rows|length }}</div>
+    </div>
+    <div class="cr-badge blue">
+        <div class="cr-badge-label">Total Received</div>
+        <div class="cr-badge-value">{{ total_received }}</div>
+    </div>
+    <div class="cr-badge red">
+        <div class="cr-badge-label">Total Consumed</div>
+        <div class="cr-badge-value">{{ total_consumed }}</div>
+    </div>
+    <div class="cr-badge green">
+        <div class="cr-badge-label">Balance on Hand</div>
+        <div class="cr-badge-value">{{ total_balance }}</div>
+    </div>
+</div>
+{% endif %}
+
+<!-- ── Screen Table ───────────────────────────────────────────────────────── -->
+<div class="cr-table-wrap">
+{% if rows %}
+<table class="cr-table">
+    <thead>
+        <tr>
+            <th>#</th>
+            <th>Item Code</th>
+            <th>Description</th>
+            <th>Unit of Measure</th>
+            <th class="num">Previous Balance</th>
+            <th class="num">Received during the Month</th>
+            <th class="num">Consumed during the Month</th>
+            <th class="num">Balance on Hand</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+        <tr>
+            <td style="color:#94a3b8;font-size:11px;">{{ forloop.counter }}</td>
+            <td class="item-code">{{ row.item_code }}</td>
+            <td class="desc">{{ row.description }}</td>
+            <td class="uom">{{ row.unit_of_measure }}</td>
+            <td class="num {% if row.previous_balance == 0 %}zero{% endif %}">
+                {{ row.previous_balance }}
+            </td>
+            <td class="num {% if row.received == 0 %}zero{% endif %}">
+                {{ row.received }}
+            </td>
+            <td class="num {% if row.consumed == 0 %}zero{% endif %}">
+                {{ row.consumed }}
+            </td>
+            <td class="num {% if row.balance_on_hand < 0 %}negative{% elif row.balance_on_hand == 0 %}zero{% endif %}">
+                {{ row.balance_on_hand }}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="cr-empty">
+    <i class="fas fa-file-circle-xmark"></i>
+    <p>No medicines found. Please select a month and year and click <strong>Generate</strong>.</p>
+</div>
+{% endif %}
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     PRINTABLE SHEET  (hidden on screen, rendered on print)
+═══════════════════════════════════════════════════════════════════════════ -->
+<div id="printable">
+
+    <div class="print-header">
+
+        <!-- Form number top-right -->
+        <div class="ph-form-no">MMS-FM-004/Rev.2/2Jan2025</div>
+
+        <!-- Logo + Text + Logo row -->
+        <div class="ph-header-row">
+            <div class="ph-logo-left">
+                <img src="{% static 'img/doh_logo.png' %}" alt="DOH Logo">
+            </div>
+
+            <div class="ph-header-center">
+                <div class="ph-republic">Republic of the Philippines</div>
+                <div class="ph-dept">Department of Health</div>
+                <div class="ph-hospital">Mayor Hilarion A. Ramiro Sr. Medical Center</div>
+                <div class="ph-city">Ozamiz City</div>
+                <div class="ph-title">Monthly Consumption Report as of {{ month_name }} 1-{{ last_day_of_month }}, {{ selected_year }}</div>
+                <div class="ph-unit">PHARMACY</div>
+            </div>
+
+            <div class="ph-logo-right">
+                <img src="{% static 'img/mharsmc.png' %}" alt="MHARSMC Logo">
+            </div>
+        </div>
+
+    </div>
+
+    <table class="print-table">
+        <thead>
+            <tr>
+                <th rowspan="2" style="width:80px;">Item Code</th>
+                <th rowspan="2">Description</th>
+                <th rowspan="2" style="width:60px;">Unit of Measure</th>
+                <th rowspan="2" style="width:70px;">Previous Balance</th>
+                <th>Received during the Month</th>
+                <th>Consumed during the Month</th>
+                <th rowspan="2" style="width:70px;">Balance on Hand</th>
+            </tr>
+            <tr>
+                <th style="width:70px;">Qty</th>
+                <th style="width:70px;">Qty</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td class="code">{{ row.item_code }}</td>
+                <td>{{ row.description }}</td>
+                <td style="text-align:center;text-transform:capitalize;">{{ row.unit_of_measure }}</td>
+                <td class="num">{% if row.previous_balance %}{{ row.previous_balance }}{% endif %}</td>
+                <td class="num">{% if row.received %}{{ row.received }}{% endif %}</td>
+                <td class="num">{% if row.consumed %}{{ row.consumed }}{% endif %}</td>
+                <td class="num">{% if row.balance_on_hand %}{{ row.balance_on_hand }}{% endif %}</td>
+            </tr>
+            {% endfor %}
+            {# Pad extra rows like the physical form #}
+            {% for i in "12345"|make_list %}
+            <tr>
+                <td>&nbsp;</td><td></td><td></td><td></td>
+                <td></td><td></td><td></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="print-signatures">
+        <div class="sig-block">
+            <div class="sig-label">Submitted by:</div>
+            <!-- <div class="sig-line"></div> -->
+            <div class="sig-user">{{ submitted_by }}</div>
+            <div class="sig-title">{{ position }}</div>
+        </div>
+        <div class="sig-block">
+            <div class="sig-label">Noted by:</div>
+            <!-- <div class="sig-line"></div> -->
+            <div class="sig-user">MA. ROSELIA D. MANTUA</div>
+            <div class="sig-title">Pharmacist V</div>
+        </div>
+    </div>
+
+</div><!-- /printable -->
+
+{% endblock %}
+
+
+{% block extra_js %}
+
+{% endblock %}
