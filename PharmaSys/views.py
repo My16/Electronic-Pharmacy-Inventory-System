@@ -61,6 +61,12 @@ from urllib.parse import urlencode
 from django.utils.http import url_has_allowed_host_and_scheme
 from .permissions import require, can, get_role, is_admin
 
+from django.db.models import (
+    Q, Sum, Count, F, Value, DecimalField,
+    ExpressionWrapper, FloatField, Prefetch,
+    Case, When, IntegerField
+)
+
 
 
 def _deduct_fefo(medicine, qty_needed, performed_by,
@@ -2609,23 +2615,39 @@ def dispensing_receipt(request, pk):
 @require(('dispensing', 'dispensing_card'), ajax=True)
 @require_GET
 def patient_search_ajax(request):
-    """
-    Search iHOMIS hperson by hospital number, last name, or first name.
-    Returns up to 15 results as JSON.
-    """
     q = request.GET.get('q', '').strip()
 
     if len(q) < 2:
         return JsonResponse({'results': []})
 
+    tokens = [t for t in q.replace(',', ' ').split() if t]
+    if not tokens:
+        return JsonResponse({'results': []})
+
     try:
-        qs = HPerson.objects.using('ihomis_plus').filter(
-            Q(hpercode__icontains=q)    |
-            Q(hpatcode__icontains=q)    |
-            Q(patlast__icontains=q)     |
-            Q(patfirst__icontains=q)    |
-            Q(patmedno__icontains=q)
-        ).order_by('patlast', 'patfirst')[:15]
+        qs = HPerson.objects.using('ihomis_plus').all()
+
+        for token in tokens:
+            qs = qs.filter(
+                Q(hpercode__icontains=token) |
+                Q(hpatcode__icontains=token) |
+                Q(patlast__icontains=token)  |
+                Q(patfirst__icontains=token) |
+                Q(patmedno__icontains=token)
+            )
+
+        # Rank: last name starts with it > last name contains it >
+        # first name starts with it > everything else
+        first = tokens[0]
+        qs = qs.annotate(
+            rank=Case(
+                When(patlast__istartswith=first, then=Value(0)),
+                When(patlast__icontains=first,   then=Value(1)),
+                When(patfirst__istartswith=first, then=Value(2)),
+                default=Value(3),
+                output_field=IntegerField(),
+            )
+        ).order_by('rank', 'patlast', 'patfirst')[:40]
 
         results = []
         for p in qs:
@@ -2641,7 +2663,6 @@ def patient_search_ajax(request):
                 'patmedno':        p.patmedno or '—',
             })
     except Exception as e:
-        # iHOMIS DB might be unreachable — graceful fallback
         return JsonResponse({'results': [], 'error': str(e)})
 
     return JsonResponse({'results': results})
