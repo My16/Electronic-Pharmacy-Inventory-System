@@ -55,6 +55,19 @@ urlpatterns = [
     path('doctors/delete/<int:pk>/', views.doctor_delete_view, name='doctor_delete'),
     path('doctors/toggle/<int:pk>/', views.doctor_toggle_view, name='doctor_toggle'),
 
+
+    # ── Storage Locations (floor plan) ────────────────────────────────────────
+    path('storage/',                           views.storage_locations,        name='storage_locations'),
+    path('storage/areas/add/',                 views.storage_area_create,      name='storage_area_create'),
+    path('storage/areas/edit/<int:pk>/',       views.storage_area_update,      name='storage_area_update'),
+    path('storage/areas/delete/<int:pk>/',     views.storage_area_delete,      name='storage_area_delete'),
+    path('storage/locations/add/',             views.storage_location_create,  name='storage_location_create'),
+    path('storage/locations/edit/<int:pk>/',   views.storage_location_update,  name='storage_location_update'),
+    path('storage/locations/delete/<int:pk>/', views.storage_location_delete,  name='storage_location_delete'),
+    path('storage/locations/layout/',          views.storage_location_layout,  name='storage_location_layout'),
+    path('storage/locations/<int:pk>/medicines/', views.storage_location_medicines, name='storage_location_medicines'),
+    path('storage/find/',                      views.storage_find_medicine,    name='storage_find'),
+
     # ── User Management ───────────────────────────────────────────────────────
     path('users/',                   views.user_management_view,    name='user_management'),
     path('users/add/',               views.user_add_view,           name='user_add'),

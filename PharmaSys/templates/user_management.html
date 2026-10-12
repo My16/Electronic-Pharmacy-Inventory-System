@@ -107,7 +107,7 @@
 
                 <!-- Role -->
                 <td>
-                    {% with role=u.profile.role %}
+                    {% with role=u.effective_role %}
                     {% if role == 'admin' %}
                         <span class="role-badge admin"><i class="fas fa-shield-halved"></i> Administrator</span>
                     {% elif role == 'staff' %}
@@ -145,9 +145,9 @@
                                 data-email="{{ u.email|escapejs }}"
                                 data-username="{{ u.username|escapejs }}"
                                 data-position="{{ u.profile.position|escapejs }}"
-                                data-role="{{ u.profile.role }}"
+                                data-role="{{ u.effective_role }}"
                                 data-is-active="{{ u.is_active|yesno:'true,false' }}"
-                                data-perms="{{ u.permissions.inventory|yesno:'1,0' }},{{ u.permissions.stock_management|yesno:'1,0' }},{{ u.permissions.dispensing|yesno:'1,0' }},{{ u.permissions.dispensing_card|yesno:'1,0' }},{{ u.permissions.doctors|yesno:'1,0' }},{{ u.permissions.suppliers|yesno:'1,0' }},{{ u.permissions.reports|yesno:'1,0' }},{{ u.permissions.consumption_report|yesno:'1,0' }}"
+                                data-perms="{{ u.perms_json }}"
                                 onclick="openEditModal(this)">
                             <i class="fas fa-pen-to-square"></i>
                         </button>
@@ -273,9 +273,9 @@
                     <label class="form-label">Role</label>
                     <select name="role" id="add_role" class="form-control"
                             onchange="handleAddRoleChange(this.value)">
-                        <option value="user">User</option>
-                        <option value="staff">Staff</option>
-                        <option value="admin">Administrator</option>
+                            <option value="user">User — view only</option>
+                            <option value="staff">Staff — view, add &amp; edit</option>
+                            <option value="admin">Administrator — full access</option>
                     </select>
                 </div>
 
@@ -377,9 +377,9 @@
                         <label class="form-label">Role</label>
                         <select name="role" id="edit_role" class="form-control"
                                 onchange="handleRoleChange(this.value)">
-                            <option value="user">User</option>
-                            <option value="staff">Staff</option>
-                            <option value="admin">Administrator</option>
+                                <option value="user">User — view only</option>
+                                <option value="staff">Staff — view, add &amp; edit</option>
+                                <option value="admin">Administrator — full access</option>
                         </select>
                     </div>
                     <div class="form-group" style="display:flex; align-items:flex-end; padding-bottom:2px;">
@@ -535,17 +535,9 @@
         document.getElementById('edit_role').value        = role;
         document.getElementById('edit_is_active').checked = isActive;
 
-        // Load permission checkboxes
-        // Order: inventory, stock_management, dispensing, dispensing_card,
-        //        doctors, suppliers, reports, consumption_report
-        const perms   = (btn.dataset.perms || '').split(',');
-        const modules = [
-            'inventory', 'stock_management', 'dispensing', 'dispensing_card',
-            'doctors', 'suppliers', 'reports', 'consumption_report'
-        ];
-        modules.forEach((mod, i) => {
-            const cb = document.querySelector(`input[name="perm_${mod}"]`);
-            if (cb) cb.checked = perms[i] === '1';
+        const perms = JSON.parse(btn.dataset.perms || '{}');
+        document.querySelectorAll('#editForm .perm-checkbox').forEach(cb => {
+            cb.checked = !!perms[cb.dataset.module];
         });
 
         // Show/hide checklist based on role

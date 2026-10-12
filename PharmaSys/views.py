@@ -21,7 +21,7 @@ import io
 
 from django.views.decorators.http   import require_GET
 
-from .models          import Dispensing, DispensingItem
+from .models          import Dispensing, DispensingItem, StorageArea, StorageLocation, Medicine, MedicineCategory, MedicineStock, Supplier, StockMovement, Doctor
 from .ihomis_models   import HPerson
 
 from datetime import date, datetime, timedelta
@@ -53,32 +53,14 @@ except ImportError:
 from django.db import transaction
 import calendar
 
-# ─────────────────────────────────────────────────────────────────────────────
-# HELPERS
-# ─────────────────────────────────────────────────────────────────────────────
+from django.db.models import Q, Sum, Count, F, Value, DecimalField, ExpressionWrapper, FloatField, Prefetch, Min   # + Min
+from django.views.decorators.http import require_GET, require_POST                                                   # + require_POST
+from django.urls import reverse
+from urllib.parse import urlencode
 
-def get_role(user):
-    if user.is_superuser:
-        return 'admin'
-    try:
-        return user.profile.role or 'user'
-    except AttributeError:
-        return 'user'
+from django.utils.http import url_has_allowed_host_and_scheme
+from .permissions import require, can, get_role, is_admin
 
-def is_admin(user):
-    return user.is_superuser or get_role(user) == 'admin'
-
-def can_access_module(user, module):
-    """
-    Admins/superusers always pass.
-    Everyone else checks their UserPermission row.
-    """
-    if user.is_superuser or get_role(user) == 'admin':
-        return True
-    try:
-        return getattr(user.permissions, module, False)
-    except Exception:
-        return False
 
 
 def _deduct_fefo(medicine, qty_needed, performed_by,
@@ -170,7 +152,10 @@ def login_view(request):
         if user is not None:
             if user.is_active:
                 login(request, user)
-                return redirect(request.GET.get('next', 'dashboard'))
+                nxt = request.GET.get('next', '')
+                if nxt and url_has_allowed_host_and_scheme(nxt, allowed_hosts={request.get_host()}):
+                    return redirect(nxt)
+                return redirect('dashboard')
             messages.error(request, 'Your account has been disabled.')
         else:
             messages.error(request, 'Invalid username or password.')
@@ -302,8 +287,7 @@ def dashboard_view(request):
 # INVENTORY
 # ─────────────────────────────────────────────────────────────────────────────
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'inventory'), login_url='dashboard')
+@require('inventory')
 def inventory_view(request):
     today            = timezone.now().date()
     expiry_threshold = today + timezone.timedelta(days=90)
@@ -321,7 +305,7 @@ def inventory_view(request):
     except ValueError:
         per_page = 15
 
-    medicines_qs = Medicine.objects.select_related('category', 'supplier').filter(
+    medicines_qs = Medicine.objects.select_related('category', 'supplier', 'location').filter(
         is_active=True
     ).prefetch_related('batches')
 
@@ -389,6 +373,7 @@ def inventory_view(request):
         'highlight_pk':   highlight_pk,
         'categories':     MedicineCategory.objects.all(),
         'suppliers':      Supplier.objects.filter(is_active=True),
+        'storage_areas': get_storage_areas(),
         'dosage_choices': Medicine.DOSAGE_FORM_CHOICES,
         'low_stock_items':    low_stock_items,
         'expiring_batches':   expiring_batches,
@@ -401,14 +386,13 @@ def inventory_view(request):
                                    expiry_date__lte=expiry_threshold,
                                    expiry_date__gte=today).values('medicine').distinct().count(),
         'today': today,
-        'can_manage': is_admin(request.user),
-        'can_admin': is_admin(request.user),
+        'can_manage': can(request.user, 'inventory', 'edit'),
+        'can_admin':  is_admin(request.user),
     }
     return render(request, 'inventory.html', context)
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'inventory'), login_url='dashboard')
+@require('inventory', 'edit')
 def inventory_add_view(request):
     """
     Adds a new Medicine product. The initial stock (if any) creates a
@@ -433,7 +417,7 @@ def inventory_add_view(request):
                 barcode          = barcode,
                 selling_price    = request.POST.get('selling_price') or 0,
                 reorder_level    = int(request.POST.get('reorder_level') or 10),
-                storage_location = request.POST.get('storage_location', '').strip(),
+                location_id      = request.POST.get('location') or None,
                 is_s2_regulated  = request.POST.get('is_s2_regulated') == '1',
                 created_by       = request.user,
             )
@@ -467,8 +451,7 @@ def inventory_add_view(request):
     return redirect('inventory')
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'inventory'), login_url='dashboard')
+@require('inventory', 'edit')
 def inventory_edit_view(request, pk):
     """
     Edits product-level fields only (name, dosage, price, reorder level, etc.).
@@ -493,7 +476,7 @@ def inventory_edit_view(request, pk):
             medicine.barcode          = barcode
             medicine.selling_price    = request.POST.get('selling_price') or 0
             medicine.reorder_level    = int(request.POST.get('reorder_level') or 10)
-            medicine.storage_location = request.POST.get('storage_location', '').strip()
+            medicine.location_id      = request.POST.get('location') or None
             medicine.is_s2_regulated  = request.POST.get('is_s2_regulated') == '1'
             medicine.save()
             messages.success(request, f'Medicine "{medicine.medicine_name}" updated.')
@@ -502,8 +485,7 @@ def inventory_edit_view(request, pk):
     return redirect('inventory')
 
 
-@login_required(login_url='login')
-@user_passes_test(is_admin, login_url='dashboard')
+@require(level='admin')
 def inventory_delete_view(request, pk):
     if request.method == 'POST':
         medicine = get_object_or_404(Medicine, pk=pk)
@@ -514,7 +496,7 @@ def inventory_delete_view(request, pk):
     return redirect('inventory')
 
 
-@login_required(login_url='login')
+@require(('inventory', 'stock_management', 'dispensing'), ajax=True)
 def inventory_barcode_lookup(request):
     barcode = request.GET.get('barcode', '').strip()
     if not barcode:
@@ -538,8 +520,7 @@ def inventory_barcode_lookup(request):
         return JsonResponse({'found': False})
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'inventory'), login_url='dashboard')
+@require('inventory', 'edit', ajax=True)
 def inventory_stock_adjust(request, pk):
     """Quick +/- stock adjust from inventory page (creates a new batch for 'in')."""
     if request.method == 'POST':
@@ -586,7 +567,7 @@ def inventory_stock_adjust(request, pk):
 # MEDICINE SEARCH — AJAX  (used by stock management & dispensing)
 # ─────────────────────────────────────────────────────────────────────────────
 
-@login_required(login_url='login')
+@require(('inventory', 'stock_management', 'dispensing'), ajax=True)
 def medicine_search_ajax(request):
     q  = request.GET.get('q', '').strip()
     qs = Medicine.objects.filter(is_active=True).prefetch_related('batches')
@@ -632,8 +613,7 @@ def medicine_search_ajax(request):
 # STOCK MANAGEMENT
 # ─────────────────────────────────────────────────────────────────────────────
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'stock_management'), login_url='dashboard')
+@require('stock_management')
 def stock_management_view(request):
     today = timezone.now().date()
 
@@ -704,8 +684,7 @@ def stock_management_view(request):
     return render(request, 'stock_management.html', context)
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'stock_management'), login_url='dashboard')
+@require('stock_management', 'edit')
 def stock_in_view(request):
     """
     Records a new delivery. Always creates a new MedicineStock batch.
@@ -783,8 +762,7 @@ def stock_in_view(request):
     return redirect('stock_management')
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'stock_management'), login_url='dashboard')
+@require('stock_management', 'edit')
 def stock_out_view(request):
     """
     Records stock removal using FEFO deduction.
@@ -829,8 +807,7 @@ def stock_out_view(request):
     return redirect('stock_management')
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'stock_management'), login_url='dashboard')
+@require('stock_management', 'edit')
 def stock_adjust_view(request):
     """
     Manual audit adjustment — sets a specific batch to a new quantity.
@@ -901,7 +878,7 @@ def stock_adjust_view(request):
     return redirect('stock_management')
 
 
-@login_required(login_url='login')
+@require(('stock_management', 'inventory'), ajax=True)
 def stock_medicine_info(request):
     pk = request.GET.get('pk', '')
     if not pk:
@@ -955,8 +932,7 @@ def stock_medicine_info(request):
 # SUPPLIERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'suppliers'), login_url='dashboard')
+@require('suppliers')
 def suppliers_view(request):
     search        = request.GET.get('search', '').strip()
     status_filter = request.GET.get('status', '')
@@ -1005,8 +981,7 @@ def suppliers_view(request):
     return render(request, 'suppliers.html', context)
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'suppliers'), login_url='dashboard')
+@require('suppliers', 'edit')
 def supplier_add_view(request):
     if request.method == 'POST':
         name = request.POST.get('name', '').strip()
@@ -1028,8 +1003,7 @@ def supplier_add_view(request):
     return redirect('suppliers')
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'suppliers'), login_url='dashboard')
+@require('suppliers', 'edit')
 def supplier_edit_view(request, pk):
     supplier = get_object_or_404(Supplier, pk=pk)
     if request.method == 'POST':
@@ -1052,8 +1026,7 @@ def supplier_edit_view(request, pk):
     return redirect('suppliers')
 
 
-@login_required(login_url='login')
-@user_passes_test(is_admin, login_url='dashboard')
+@require(level='admin')
 def supplier_delete_view(request, pk):
     if request.method == 'POST':
         supplier = get_object_or_404(Supplier, pk=pk)
@@ -1063,8 +1036,7 @@ def supplier_delete_view(request, pk):
     return redirect('suppliers')
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'suppliers'), login_url='dashboard')
+@require('suppliers', 'edit', ajax=True)
 def supplier_toggle_view(request, pk):
     if request.method == 'POST':
         supplier = get_object_or_404(Supplier, pk=pk)
@@ -1079,8 +1051,7 @@ def supplier_toggle_view(request, pk):
     return JsonResponse({'error': 'Invalid method.'}, status=405)
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'suppliers'), login_url='dashboard')
+@require('suppliers', ajax=True)
 def supplier_detail_view(request, pk):
     supplier = get_object_or_404(Supplier, pk=pk)
     medicines = list(
@@ -1117,8 +1088,7 @@ def supplier_detail_view(request, pk):
 # DOCTORS
 # ─────────────────────────────────────────────────────────────────────────────
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'doctors'), login_url='dashboard')
+@require('doctors')
 def doctors_view(request):
     search        = request.GET.get('search', '').strip()
     status_filter = request.GET.get('status', '')
@@ -1188,8 +1158,7 @@ def doctors_view(request):
     return render(request, 'doctors.html', context)
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'doctors'), login_url='dashboard')
+@require('doctors', 'edit')
 def doctor_add_view(request):
     if request.method == 'POST':
         prc_no = request.POST.get('prc_license_no', '').strip()
@@ -1221,8 +1190,7 @@ def doctor_add_view(request):
     return redirect('doctors')
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'doctors'), login_url='dashboard')
+@require('doctors', 'edit')
 def doctor_edit_view(request, pk):
     doctor = get_object_or_404(Doctor, pk=pk)
     if request.method == 'POST':
@@ -1249,8 +1217,7 @@ def doctor_edit_view(request, pk):
     return redirect('doctors')
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'doctors'), login_url='dashboard')
+@require(level='admin')
 def doctor_delete_view(request, pk):
     if request.method == 'POST':
         doctor = get_object_or_404(Doctor, pk=pk)
@@ -1262,8 +1229,7 @@ def doctor_delete_view(request, pk):
     return redirect('doctors')
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'doctors'), login_url='dashboard')
+@require('doctors', 'edit', ajax=True)
 def doctor_toggle_view(request, pk):
     if request.method == 'POST':
         doctor = get_object_or_404(Doctor, pk=pk)
@@ -1282,8 +1248,7 @@ def doctor_toggle_view(request, pk):
 # DOCTOR AJAX ENDPOINTS
 # ─────────────────────────────────────────────────────────────────────────────
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'doctors'), login_url='dashboard')
+@require(('doctors', 'dispensing'), ajax=True)
 def doctor_search_ajax(request):
     """
     Typeahead search for the dispensing doctor dropdown.
@@ -1318,8 +1283,7 @@ def doctor_search_ajax(request):
     return JsonResponse({'results': results})
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'doctors'), login_url='dashboard')
+@require(('doctors', 'dispensing'), ajax=True)
 def doctor_s2_validate_ajax(request):
     """
     Given a doctor PK, returns whether their S2 license is valid for dispensing.
@@ -1374,52 +1338,46 @@ def doctor_s2_validate_ajax(request):
 # USER MANAGEMENT
 # ─────────────────────────────────────────────────────────────────────────────
 
-@login_required(login_url='login')
-@user_passes_test(is_admin, login_url='dashboard')
+def _other_active_admins(exclude_pk):
+    return (User.objects.filter(is_active=True)
+            .filter(Q(is_superuser=True) | Q(profile__role='admin'))
+            .exclude(pk=exclude_pk).count())
+
+
+@require(level='admin')
 def user_management_view(request):
     search_query = request.GET.get('search', '').strip()
-    users = User.objects.select_related(
-        'profile', 'permissions'
-    ).order_by('-date_joined')
-
+    qs = User.objects.select_related('profile', 'permissions').order_by('-date_joined')
     if search_query:
-        users = users.filter(
+        qs = qs.filter(
             Q(username__icontains=search_query)   |
             Q(first_name__icontains=search_query) |
             Q(last_name__icontains=search_query)  |
             Q(email__icontains=search_query)
         )
-
-    # Ensure every user has a permissions row (handles users created before this feature)
+    users = list(qs)
     for u in users:
-        UserPermission.objects.get_or_create(user=u)
+        u.effective_role = get_role(u)
+        u.perms_json = json.dumps(u.permissions.as_dict())
 
-    # Re-fetch after ensuring rows exist so template can read permissions
-    users = User.objects.select_related(
-        'profile', 'permissions'
-    ).order_by('-date_joined')
-
-    if search_query:
-        users = users.filter(
-            Q(username__icontains=search_query)   |
-            Q(first_name__icontains=search_query) |
-            Q(last_name__icontains=search_query)  |
-            Q(email__icontains=search_query)
-        )
-
-    context = {
+    return render(request, 'user_management.html', {
         'users':          users,
         'search_query':   search_query,
         'total_users':    User.objects.count(),
         'active_users':   User.objects.filter(is_active=True).count(),
         'inactive_users': User.objects.filter(is_active=False).count(),
         'module_choices': UserPermission.MODULE_CHOICES,
-    }
-    return render(request, 'user_management.html', context)
+    })
 
 
-@login_required(login_url='login')
-@user_passes_test(is_admin, login_url='dashboard')
+def _save_module_perms(request, user_obj):
+    perm, _created = UserPermission.objects.get_or_create(user=user_obj)
+    for key in UserPermission.module_keys():
+        setattr(perm, key, request.POST.get(f'perm_{key}') == 'on')
+    perm.save()
+
+
+@require(level='admin')
 def user_add_view(request):
     if request.method == 'POST':
         username    = request.POST.get('username', '').strip()
@@ -1431,7 +1389,12 @@ def user_add_view(request):
         password    = request.POST.get('password', '')
         confirm_pw  = request.POST.get('confirm_password', '')
         role        = request.POST.get('role', 'user')
-        if User.objects.filter(username=username).exists():
+        if role not in ('user', 'staff', 'admin'):
+            role = 'user'
+
+        if not username:
+            messages.error(request, 'Username is required.')
+        elif User.objects.filter(username__iexact=username).exists():
             messages.error(request, f'Username "{username}" is taken.')
         elif not password:
             messages.error(request, 'Password cannot be empty.')
@@ -1440,68 +1403,76 @@ def user_add_view(request):
         elif len(password) < 8:
             messages.error(request, 'Password must be at least 8 characters.')
         else:
-            user = User.objects.create_user(
-                username=username, first_name=first_name,
-                last_name=last_name, email=email, password=password,
-                is_staff=role in ('staff', 'admin'),
-            )
-            user.profile.middle_name = middle_name
-            user.profile.position = position
-            user.profile.role = role
-            user.profile.save()
-
-            # Save module permissions (skipped for admins)
-            if role != 'admin' and not user.is_superuser:
-                perm, _ = UserPermission.objects.get_or_create(user=user)
-                for module_key, _ in UserPermission.MODULE_CHOICES:
-                    setattr(perm, module_key, request.POST.get(f'perm_{module_key}') == 'on')
-                perm.save()
-
+            with transaction.atomic():
+                user = User.objects.create_user(
+                    username=username, first_name=first_name,
+                    last_name=last_name, email=email, password=password,
+                )
+                # profile + permission rows are created by the post_save signal
+                user.profile.middle_name = middle_name
+                user.profile.position    = position
+                user.profile.role        = role
+                user.profile.save()
+                if role != 'admin':
+                    _save_module_perms(request, user)
             messages.success(request, f'User "{user.username}" created.')
     return redirect('user_management')
 
 
-@login_required(login_url='login')
-@user_passes_test(is_admin, login_url='dashboard')
+@require(level='admin')
 def user_edit_view(request, pk):
     user_obj = get_object_or_404(User, pk=pk)
     if request.method == 'POST':
-        user_obj.first_name = request.POST.get('first_name', '').strip()
-        user_obj.last_name  = request.POST.get('last_name', '').strip()
-        user_obj.email      = request.POST.get('email', '').strip()
-        user_obj.is_active  = request.POST.get('is_active') == 'on'
         role = request.POST.get('role', 'user')
-        user_obj.is_staff = role in ('staff', 'admin')
-        new_pw = request.POST.get('password', '')
-        if new_pw:
-            if len(new_pw) < 8:
-                messages.error(request, 'Password must be at least 8 characters.')
-                return redirect('user_management')
-            user_obj.set_password(new_pw)
-        user_obj.save()
-        user_obj.profile.middle_name = request.POST.get('middle_name', '').strip()
-        user_obj.profile.position = request.POST.get('position', '').strip()
-        user_obj.profile.role = role
-        user_obj.profile.save()
+        if role not in ('user', 'staff', 'admin'):
+            role = 'user'
+        is_active = request.POST.get('is_active') == 'on'
+        new_pw    = request.POST.get('password', '')
 
-        # ── Save module permissions (skipped for admins — they always get everything)
-        if not user_obj.is_superuser and get_role(user_obj) != 'admin':
-            perm, _ = UserPermission.objects.get_or_create(user=user_obj)
-            for module_key, _ in UserPermission.MODULE_CHOICES:
-                setattr(perm, module_key, request.POST.get(f'perm_{module_key}') == 'on')
-            perm.save()
+        stays_admin = user_obj.is_superuser or role == 'admin'
+        was_admin   = is_admin(user_obj)
+
+        if user_obj == request.user and (not stays_admin or not is_active):
+            messages.error(request, "You can't remove your own admin rights or deactivate yourself.")
+            return redirect('user_management')
+        if was_admin and (not stays_admin or not is_active) \
+                and _other_active_admins(user_obj.pk) == 0:
+            messages.error(request, 'At least one active administrator is required.')
+            return redirect('user_management')
+        if new_pw and len(new_pw) < 8:
+            messages.error(request, 'Password must be at least 8 characters.')
+            return redirect('user_management')
+
+        with transaction.atomic():
+            user_obj.first_name = request.POST.get('first_name', '').strip()
+            user_obj.last_name  = request.POST.get('last_name', '').strip()
+            user_obj.email      = request.POST.get('email', '').strip()
+            user_obj.is_active  = is_active
+            if new_pw:
+                user_obj.set_password(new_pw)
+            user_obj.save()
+
+            profile             = user_obj.profile
+            profile.middle_name = request.POST.get('middle_name', '').strip()
+            profile.position    = request.POST.get('position', '').strip()
+            profile.role        = role
+            profile.save()
+
+            if role != 'admin':
+                _save_module_perms(request, user_obj)
 
         messages.success(request, f'User "{user_obj.username}" updated.')
     return redirect('user_management')
 
 
-@login_required(login_url='login')
-@user_passes_test(is_admin, login_url='dashboard')
+@require(level='admin')
 def user_delete_view(request, pk):
     if request.method == 'POST':
         user_obj = get_object_or_404(User, pk=pk)
         if user_obj == request.user:
             messages.error(request, 'Cannot delete your own account.')
+        elif is_admin(user_obj) and _other_active_admins(user_obj.pk) == 0:
+            messages.error(request, 'Cannot delete the last administrator.')
         else:
             username = user_obj.username
             user_obj.delete()
@@ -1509,13 +1480,14 @@ def user_delete_view(request, pk):
     return redirect('user_management')
 
 
-@login_required(login_url='login')
-@user_passes_test(is_admin, login_url='dashboard')
+@require(level='admin', ajax=True)
 def user_toggle_active_view(request, pk):
     if request.method == 'POST':
         user_obj = get_object_or_404(User, pk=pk)
         if user_obj == request.user:
             return JsonResponse({'error': 'Cannot deactivate your own account.'}, status=400)
+        if user_obj.is_active and is_admin(user_obj) and _other_active_admins(user_obj.pk) == 0:
+            return JsonResponse({'error': 'Cannot deactivate the last administrator.'}, status=400)
         user_obj.is_active = not user_obj.is_active
         user_obj.save()
         label = 'activated' if user_obj.is_active else 'deactivated'
@@ -1569,8 +1541,7 @@ def settings_view(request):
 # REPORTS
 # ─────────────────────────────────────────────────────────────────────────────
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'reports'), login_url='dashboard')
+@require('reports')
 def reports_view(request):
     today              = timezone.now().date()
     expiry_threshold   = today + timedelta(days=90)
@@ -1757,8 +1728,7 @@ def reports_view(request):
 # EXPORT — EXCEL  (unchanged structure, batch-aware expiry data)
 # ─────────────────────────────────────────────────────────────────────────────
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'reports'), login_url='dashboard')
+@require('reports')
 def report_export_excel(request):
     if not OPENPYXL_AVAILABLE:
         messages.error(request, 'openpyxl is not installed. Run: pip install openpyxl')
@@ -1995,8 +1965,7 @@ def report_export_excel(request):
 # EXPORT — PDF
 # ─────────────────────────────────────────────────────────────────────────────
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'reports'), login_url='dashboard')
+@require('reports')
 def report_export_pdf(request):
     if not REPORTLAB_AVAILABLE:
         messages.error(request, 'reportlab is not installed. Run: pip install reportlab')
@@ -2222,8 +2191,7 @@ def report_export_pdf(request):
     return response
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'consumption_report'), login_url='dashboard')
+@require('consumption_report')
 def consumption_report(request):
     # Helper function to format name with middle initial
     def get_formatted_name(user):
@@ -2375,8 +2343,7 @@ def consumption_report(request):
 # DISPENSING
 # ─────────────────────────────────────────────────────────────────────────────
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'dispensing'), login_url='dashboard')
+@require('dispensing')
 def dispensing_view(request):
     today = timezone.now().date()
 
@@ -2410,8 +2377,7 @@ def dispensing_view(request):
     return render(request, 'dispensing.html', context)
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'dispensing'), login_url='dashboard')
+@require('dispensing', 'edit', ajax=True)
 @transaction.atomic
 def dispensing_create(request):
     if request.method != 'POST':
@@ -2591,8 +2557,7 @@ def dispensing_create(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'dispensing'), login_url='dashboard')
+@require(('dispensing', 'dispensing_card'), ajax=True)
 def dispensing_receipt(request, pk):
     txn = get_object_or_404(
         Dispensing.objects.select_related('pharmacist').prefetch_related('items__medicine'),
@@ -2641,7 +2606,7 @@ def dispensing_receipt(request, pk):
 # AJAX: Search iHOMIS patients
 # URL:  /dispensing/patient-search/?q=<term>
 # ─────────────────────────────────────────────────────────────────────────────
-@login_required
+@require(('dispensing', 'dispensing_card'), ajax=True)
 @require_GET
 def patient_search_ajax(request):
     """
@@ -2686,7 +2651,7 @@ def patient_search_ajax(request):
 # AJAX: Fetch one iHOMIS patient by hpatkey
 # URL:  /dispensing/patient/<hpatkey>/info/
 # ─────────────────────────────────────────────────────────────────────────────
-@login_required
+@require(('dispensing', 'dispensing_card'), ajax=True)
 @require_GET
 def patient_info_ajax(request, hpatkey):
     try:
@@ -2715,8 +2680,7 @@ def patient_info_ajax(request, hpatkey):
 # PAGE: Dispensing Card list (search & select patient)
 # URL:  /dispensing/card/
 # ─────────────────────────────────────────────────────────────────────────────
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'dispensing_card'), login_url='dashboard')
+@require('dispensing_card')
 def dispensing_card_list(request):
     """
     Landing page for the Dispensing Card module.
@@ -2732,8 +2696,7 @@ def dispensing_card_list(request):
 # PAGE/AJAX: Dispensing Card for one patient
 # URL:  /dispensing/card/<hpatkey>/
 # ─────────────────────────────────────────────────────────────────────────────
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'dispensing_card'), login_url='dashboard')
+@require('dispensing_card')
 def dispensing_card_detail(request, hpatkey):
     hpatkey_str = str(hpatkey).strip()
  
@@ -2847,7 +2810,7 @@ def dispensing_card_detail(request, hpatkey):
 # URL:  /dispensing/<pk>/link-patient/   POST
 # Called from the dispensing page when pharmacist selects a patient
 # ─────────────────────────────────────────────────────────────────────────────
-@login_required
+@require('dispensing', 'edit', ajax=True)
 def link_patient_to_dispensing(request, pk):
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
@@ -2879,7 +2842,7 @@ def link_patient_to_dispensing(request, pk):
 # CATEGORY — AJAX search + create
 # ─────────────────────────────────────────────────────────────────────────────
 
-@login_required(login_url='login')
+@require(('inventory', 'stock_management'), ajax=True)
 def category_search_ajax(request):
     q  = request.GET.get('q', '').strip()
     qs = MedicineCategory.objects.all()
@@ -2889,8 +2852,7 @@ def category_search_ajax(request):
     return JsonResponse({'results': [{'pk': c.pk, 'name': c.name} for c in qs]})
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'inventory'), login_url='dashboard')
+@require('inventory', 'edit', ajax=True)
 def category_create_ajax(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Invalid method.'}, status=405)
@@ -2912,8 +2874,7 @@ def category_create_ajax(request):
 # BATCH MANAGEMENT — AJAX edit + soft-delete
 # ─────────────────────────────────────────────────────────────────────────────
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'stock_management'), login_url='dashboard')
+@require('stock_management', 'edit', ajax=True)
 def batch_edit_view(request, pk):
     """
     AJAX POST — edit a MedicineStock batch's correctable fields:
@@ -2946,8 +2907,7 @@ def batch_edit_view(request, pk):
         return JsonResponse({'error': str(e)}, status=400)
 
 
-@login_required(login_url='login')
-@user_passes_test(lambda u: can_access_module(u, 'stock_management'), login_url='dashboard')
+@require('stock_management', 'edit', ajax=True)
 def batch_delete_view(request, pk):
     """
     AJAX POST — soft-delete a MedicineStock batch by zeroing its quantity.
@@ -2998,8 +2958,7 @@ def batch_delete_view(request, pk):
 # ACCESS MANAGEMENT
 # ─────────────────────────────────────────────────────────────────────────────
 
-@login_required(login_url='login')
-@user_passes_test(is_admin, login_url='dashboard')
+@require(level='admin')
 def access_management_view(request):
     """
     Admin-only page. Shows nothing to configure at the role level —
@@ -3010,16 +2969,347 @@ def access_management_view(request):
         'profile', 'permissions'
     ).filter(is_active=True).order_by('first_name', 'last_name')
 
-    # Ensure every user has a permissions row
-    for u in users_with_perms:
-        UserPermission.objects.get_or_create(user=u)
-
-    users_with_perms = User.objects.select_related(
-        'profile', 'permissions'
-    ).filter(is_active=True).order_by('first_name', 'last_name')
-
     context = {
         'users_with_perms': users_with_perms,
         'module_choices':   UserPermission.MODULE_CHOICES,
     }
     return render(request, 'access_management.html', context)
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STORAGE LOCATIONS (floor plan)
+# ─────────────────────────────────────────────────────────────────────────────
+
+STORAGE_ORIENTATIONS = {
+    'landscape': (860, 540),
+    'portrait':  (580, 700),
+    'square':    (700, 700),
+}
+
+
+def get_storage_areas():
+    """Areas with a `.choices` list of storable locations (Inventory dropdown)."""
+    return StorageArea.objects.prefetch_related(
+        Prefetch(
+            'locations',
+            queryset=StorageLocation.objects.filter(kind='shelf').order_by('code'),
+            to_attr='choices',
+        )
+    )
+
+
+def _storage_url(area_id=None, **extra):
+    params = {}
+    if area_id:
+        params['area'] = area_id
+    params.update(extra)
+    url = reverse('storage_locations')
+    return url + ('?' + urlencode(params) if params else '')
+
+
+def _to_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _active_meds_qs():
+    """Active medicines with total stock computed in ONE query."""
+    return Medicine.objects.filter(is_active=True).annotate(total_qty=Sum('batches__quantity'))
+
+
+def _stock_state(m):
+    qty = m.total_qty or 0
+    if qty == 0:
+        return 'out'
+    return 'low' if qty <= m.reorder_level else 'ok'
+
+
+@require('storage_locations')
+def storage_locations(request):
+    areas = list(
+        StorageArea.objects.prefetch_related(
+            Prefetch(
+                'locations',
+                queryset=StorageLocation.objects.prefetch_related(
+                    Prefetch('medicines', queryset=_active_meds_qs(), to_attr='active_meds')
+                ).order_by('code'),
+            )
+        )
+    )
+
+    plan = []
+    shelves = used = total_meds = 0
+    for a in areas:
+        locs = []
+        for l in a.locations.all():
+            meds   = l.active_meds
+            alerts = sum(1 for m in meds if _stock_state(m) != 'ok')
+            if l.kind == 'shelf':
+                shelves += 1
+                total_meds += len(meds)
+                if meds:
+                    used += 1
+            locs.append({
+                'id': l.pk, 'code': l.code, 'name': l.name, 'kind': l.kind,
+                'x': l.x, 'y': l.y, 'w': l.w, 'h': l.h,
+                'notes': l.notes, 'count': len(meds), 'alert': alerts,
+            })
+        plan.append({
+            'id': a.pk, 'name': a.name, 'description': a.description,
+            'canvas_w': a.canvas_w, 'canvas_h': a.canvas_h, 'locations': locs,
+        })
+
+    can_edit = can(request.user, 'storage_locations', 'edit')
+    can_admin = is_admin(request.user)
+
+    return render(request, 'floor_plan.html', {
+        'plan_data': plan,
+        'initial': {
+            'area':  _to_int(request.GET.get('area')),
+            'focus': _to_int(request.GET.get('focus')),
+            'open':  _to_int(request.GET.get('open')),
+            'edit':  bool(can_edit and request.GET.get('edit')),
+        },
+        'area_count':  len(areas),
+        'shelf_count': shelves,
+        'used_count':  used,
+        'med_count':   total_meds,
+        'kind_choices': StorageLocation.KIND_CHOICES,
+        'can_manage': can_edit,
+        'can_admin':  can_admin,
+    })
+
+
+# ── JSON: medicines inside one shelf ─────────────────────────────────────────
+@require(('storage_locations', 'inventory'), ajax=True)
+def storage_location_medicines(request, pk):
+    loc   = get_object_or_404(StorageLocation.objects.select_related('area'), pk=pk)
+    today = timezone.now().date()
+    soon  = today + timedelta(days=90)
+    meds  = (
+        loc.medicines.filter(is_active=True)
+        .annotate(
+            total_qty=Sum('batches__quantity'),
+            next_expiry=Min('batches__expiry_date', filter=Q(batches__quantity__gt=0)),
+        )
+        .order_by('medicine_name')
+    )
+    rows = []
+    for m in meds:
+        exp = m.next_expiry
+        if not exp:
+            exp_state = ''
+        elif exp < today:
+            exp_state = 'expired'
+        elif exp <= soon:
+            exp_state = 'soon'
+        else:
+            exp_state = 'ok'
+        rows.append({
+            'id': m.pk, 'name': m.medicine_name, 'generic': m.generic_name,
+            'brand': m.brand_name, 'strength': m.strength,
+            'form': m.get_dosage_form_display(),
+            'qty': m.total_qty or 0, 'status': _stock_state(m),
+            'expiry': exp.strftime('%b %d, %Y') if exp else '', 'expiry_state': exp_state,
+            's2': m.is_s2_regulated,
+        })
+    return JsonResponse({
+        'id': loc.pk, 'code': loc.code, 'name': loc.name, 'area': loc.area.name,
+        'kind': loc.kind, 'notes': loc.notes, 'medicines': rows,
+    })
+
+
+# ── JSON: "where is this medicine?" ──────────────────────────────────────────
+@require(('storage_locations', 'inventory'), ajax=True)
+def storage_find_medicine(request):
+    q = request.GET.get('q', '').strip()
+    if len(q) < 2:
+        return JsonResponse({'results': []})
+    qs = (
+        Medicine.objects.filter(is_active=True, location__isnull=False)
+        .filter(Q(medicine_name__icontains=q) | Q(generic_name__icontains=q) |
+                Q(brand_name__icontains=q) | Q(barcode__icontains=q))
+        .select_related('location', 'location__area')
+        .order_by('medicine_name')[:15]
+    )
+    return JsonResponse({'results': [{
+        'name': m.medicine_name, 'strength': m.strength,
+        'loc_id': m.location_id, 'code': m.location.code,
+        'area_id': m.location.area_id, 'area': m.location.area.name,
+    } for m in qs]})
+
+
+# ── Areas ────────────────────────────────────────────────────────────────────
+@require('storage_locations', 'edit')
+@require_POST
+def storage_area_create(request):
+    name = request.POST.get('name', '').strip()
+    if not name:
+        messages.error(request, 'Area name is required.')
+        return redirect('storage_locations')
+    if StorageArea.objects.filter(name__iexact=name).exists():
+        messages.error(request, f'An area named "{name}" already exists.')
+        return redirect('storage_locations')
+    w, h  = STORAGE_ORIENTATIONS.get(request.POST.get('orientation'), STORAGE_ORIENTATIONS['landscape'])
+    order = (StorageArea.objects.order_by('-sort_order').values_list('sort_order', flat=True).first() or 0) + 1
+    area  = StorageArea.objects.create(
+        name=name, description=request.POST.get('description', '').strip(),
+        canvas_w=w, canvas_h=h, sort_order=order,
+    )
+    messages.success(request, f'Area "{area.name}" added. Add storage locations to build its floor plan.')
+    return redirect(_storage_url(area.pk))
+
+
+@require('storage_locations', 'edit')
+@require_POST
+def storage_area_update(request, pk):
+    area = get_object_or_404(StorageArea, pk=pk)
+    name = request.POST.get('name', '').strip()
+    if not name:
+        messages.error(request, 'Area name is required.')
+    elif StorageArea.objects.filter(name__iexact=name).exclude(pk=area.pk).exists():
+        messages.error(request, f'An area named "{name}" already exists.')
+    else:
+        area.name = name
+        area.description = request.POST.get('description', '').strip()
+        area.save()
+        messages.success(request, f'Area "{area.name}" updated.')
+    return redirect(_storage_url(area.pk))
+
+
+@require(level='admin')
+@require_POST
+def storage_area_delete(request, pk):
+    area = get_object_or_404(StorageArea, pk=pk)
+    if StorageLocation.objects.filter(area=area, medicines__is_active=True).exists():
+        messages.error(request, f'Cannot remove "{area.name}" — medicines are still assigned to its '
+                                'locations. Reassign them first.')
+        return redirect(_storage_url(area.pk))
+    name, n = area.name, area.locations.count()
+    area.delete()
+    messages.success(request, f'Area "{name}" and its {n} location(s) removed.')
+    return redirect('storage_locations')
+
+
+# ── Locations ────────────────────────────────────────────────────────────────
+def _default_slot(area):
+    n = area.locations.count() % 6
+    return {'x': 5 + n * 3, 'y': 5 + n * 3, 'w': 16, 'h': 12}
+
+
+@require('storage_locations', 'edit')
+@require_POST
+def storage_location_create(request):
+    area = StorageArea.objects.filter(pk=_to_int(request.POST.get('area')) or 0).first()
+    if not area:
+        messages.error(request, 'Please choose an area.')
+        return redirect('storage_locations')
+    code = request.POST.get('code', '').strip()[:30]
+    if not code:
+        messages.error(request, 'Location code is required.')
+        return redirect(_storage_url(area.pk))
+    if StorageLocation.objects.filter(code__iexact=code).exists():
+        messages.error(request, f'A location with code "{code}" already exists.')
+        return redirect(_storage_url(area.pk))
+    kind = request.POST.get('kind')
+    if kind not in dict(StorageLocation.KIND_CHOICES):
+        kind = StorageLocation.KIND_SHELF
+    loc = StorageLocation.objects.create(
+        area=area, code=code, name=request.POST.get('name', '').strip()[:80],
+        kind=kind, notes=request.POST.get('notes', '').strip(), **_default_slot(area),
+    )
+    messages.success(request, f'Location "{loc.code}" added — drag it into place, then Save Layout.')
+    return redirect(_storage_url(area.pk, edit=1, focus=loc.pk))
+
+
+@require('storage_locations', 'edit')
+@require_POST
+def storage_location_update(request, pk):
+    loc  = get_object_or_404(StorageLocation, pk=pk)
+    code = request.POST.get('code', '').strip()[:30]
+    if not code:
+        messages.error(request, 'Location code is required.')
+        return redirect(_storage_url(loc.area_id))
+    if StorageLocation.objects.filter(code__iexact=code).exclude(pk=loc.pk).exists():
+        messages.error(request, f'A location with code "{code}" already exists.')
+        return redirect(_storage_url(loc.area_id))
+
+    kind = request.POST.get('kind')
+    if kind not in dict(StorageLocation.KIND_CHOICES):
+        kind = loc.kind
+    if kind == StorageLocation.KIND_LANDMARK and loc.medicines.filter(is_active=True).exists():
+        messages.error(request, f'"{loc.code}" still holds medicines — reassign them before making it a landmark.')
+        return redirect(_storage_url(loc.area_id))
+
+    new_area = StorageArea.objects.filter(pk=_to_int(request.POST.get('area')) or 0).first() or loc.area
+    if new_area.pk != loc.area_id:
+        loc.area = new_area
+        for k, v in _default_slot(new_area).items():
+            setattr(loc, k, v)
+
+    loc.code  = code
+    loc.name  = request.POST.get('name', '').strip()[:80]
+    loc.kind  = kind
+    loc.notes = request.POST.get('notes', '').strip()
+    loc.save()
+    messages.success(request, f'Location "{loc.code}" updated.')
+    return redirect(_storage_url(loc.area_id, focus=loc.pk))
+
+
+@require(level='admin')
+@require_POST
+def storage_location_delete(request, pk):
+    loc = get_object_or_404(StorageLocation, pk=pk)
+    area_id, code = loc.area_id, loc.code
+    n = loc.medicines.filter(is_active=True).count()
+    loc.delete()                       # Medicine.location is SET_NULL
+    msg = f'Location "{code}" removed.'
+    if n:
+        msg += f' {n} medicine(s) are now unassigned.'
+    messages.success(request, msg)
+    return redirect(_storage_url(area_id))
+
+
+@require('storage_locations', 'edit', ajax=True)
+@require_POST
+def storage_location_layout(request):
+    """Bulk-save dragged / resized shelf positions and canvas sizes (JSON)."""
+    try:
+        payload = json.loads(request.body or b'{}')
+        items   = payload.get('positions', []) or []
+        parsed  = {int(i['id']): i for i in items}
+        canvases = payload.get('canvases', []) or []
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return JsonResponse({'ok': False, 'error': 'Invalid data.'}, status=400)
+
+    # ── Shelf positions ──────────────────────────────────────────────────────
+    changed = []
+    for loc in StorageLocation.objects.filter(pk__in=parsed.keys()):
+        it = parsed[loc.pk]
+        try:
+            w = min(max(float(it['w']), 3.0), 100.0)
+            h = min(max(float(it['h']), 3.0), 100.0)
+            x = min(max(float(it['x']), 0.0), 100.0 - w)
+            y = min(max(float(it['y']), 0.0), 100.0 - h)
+        except (KeyError, TypeError, ValueError):
+            continue
+        loc.x, loc.y, loc.w, loc.h = round(x, 2), round(y, 2), round(w, 2), round(h, 2)
+        changed.append(loc)
+    if changed:
+        StorageLocation.objects.bulk_update(changed, ['x', 'y', 'w', 'h'])
+
+    # ── Canvas (whole floor plan) sizes ──────────────────────────────────────
+    canvas_saved = 0
+    for c in canvases:
+        try:
+            area_id = int(c['id'])
+            cw = min(max(int(c['w']), 360), 2400)
+            ch = min(max(int(c['h']), 240), 1800)
+        except (KeyError, TypeError, ValueError):
+            continue
+        canvas_saved += StorageArea.objects.filter(pk=area_id).update(canvas_w=cw, canvas_h=ch)
+
+    return JsonResponse({'ok': True, 'saved': len(changed), 'canvases': canvas_saved})

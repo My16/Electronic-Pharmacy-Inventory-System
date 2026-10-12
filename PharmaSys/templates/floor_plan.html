@@ -1,0 +1,885 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}ePIS — Storage Locations{% endblock %}
+{% block page_title %}Storage Locations{% endblock %}
+{% block breadcrumb %}Storage Locations{% endblock %}
+{% block nav_storage %}active{% endblock %}
+
+{% block extra_css %}
+<style>
+/* ── Summary Cards ─────────────────────────────────── */
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:22px}
+.stat-card{background:#fff;border-radius:14px;padding:18px 20px;display:flex;align-items:center;gap:14px;box-shadow:0 2px 12px rgba(0,0,0,.06);border:1px solid #eef2f7;animation:slideUp .4s ease both}
+.stat-card:nth-child(2){animation-delay:.07s}.stat-card:nth-child(3){animation-delay:.14s}.stat-card:nth-child(4){animation-delay:.21s}
+@keyframes slideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+.stat-icon{width:46px;height:46px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0}
+.stat-icon.teal{background:rgba(0,173,181,.12);color:#00ADB5}.stat-icon.green{background:rgba(34,197,94,.12);color:#16a34a}
+.stat-icon.orange{background:rgba(245,158,11,.12);color:#d97706}.stat-icon.purple{background:rgba(139,92,246,.12);color:#7c3aed}
+.stat-info{display:flex;flex-direction:column}.stat-value{font-size:24px;font-weight:700;color:#1a2433;line-height:1}
+.stat-label{font-size:11.5px;color:#78909c;margin-top:3px;font-weight:500}
+
+/* ── Card / toolbar ────────────────────────────────── */
+.table-card{background:#fff;border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,.06);border:1px solid #eef2f7;animation:slideUp .4s ease .2s both}
+.table-toolbar{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #f0f4f8;gap:10px;flex-wrap:wrap}
+.toolbar-left{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.toolbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.table-title{font-size:14px;font-weight:700;color:#1a2433}
+.count-badge{background:rgba(0,173,181,.1);color:#00ADB5;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px}
+.search-box{position:relative;display:flex;align-items:center}
+.search-box i{position:absolute;left:10px;color:#b0bec5;font-size:12px}
+.search-box input{border:1px solid #e0e6ed;border-radius:7px;padding:7px 12px 7px 30px;font-size:12.5px;font-family:'Poppins',sans-serif;color:#1a2433;outline:none;width:230px;background:#f8fafc;transition:border-color .2s,box-shadow .2s}
+.search-box input:focus{border-color:#00ADB5;box-shadow:0 0 0 3px rgba(0,173,181,.1);background:#fff}
+.btn-scan{display:flex;align-items:center;gap:6px;background:#f0f4f8;color:#64748b;border:1px solid #e0e6ed;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;font-family:'Poppins',sans-serif;cursor:pointer;transition:background .2s,color .2s;white-space:nowrap}
+.btn-scan:hover{background:#e0e6ed;color:#1a2433}
+.btn-scan.active{background:rgba(0,173,181,.12);border-color:rgba(0,173,181,.35);color:#00ADB5}
+.btn-add{display:flex;align-items:center;gap:7px;background:#00ADB5;color:#fff;border:none;border-radius:9px;padding:8px 16px;font-size:13px;font-weight:600;font-family:'Poppins',sans-serif;cursor:pointer;transition:background .2s,transform .15s;box-shadow:0 2px 8px rgba(0,173,181,.25);white-space:nowrap}
+.btn-add:hover{background:#008C9E;transform:translateY(-1px)}
+
+/* ── Find medicine dropdown ────────────────────────── */
+.find-wrap{position:relative}
+.find-results{display:none;position:absolute;top:100%;left:0;min-width:320px;right:0;background:#fff;border:1px solid #e0e6ed;border-top:none;border-radius:0 0 10px 10px;box-shadow:0 8px 24px rgba(0,0,0,.1);max-height:280px;overflow-y:auto;z-index:600}
+.find-results.open{display:block}
+.find-item{padding:9px 13px;cursor:pointer;border-bottom:1px solid #f4f7fb;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;color:#1a2433}
+.find-item:last-child{border-bottom:none}.find-item:hover{background:#f0f4f8}
+.find-item small{display:block;font-size:11px;color:#94a3b8;margin-top:1px}
+.find-loc{flex-shrink:0;background:rgba(0,173,181,.1);color:#00ADB5;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px}
+.find-empty{padding:12px 13px;font-size:12px;color:#94a3b8;text-align:center}
+
+/* ── Area tabs ─────────────────────────────────────── */
+.area-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 20px;border-bottom:1px solid #f0f4f8;background:#fafbfc;flex-wrap:wrap}
+.area-tabs{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.area-tab{display:inline-flex;align-items:center;gap:7px;border:1px solid #e0e6ed;background:#fff;color:#64748b;border-radius:20px;padding:6px 14px;font-size:12.5px;font-weight:600;font-family:'Poppins',sans-serif;cursor:pointer;transition:background .15s,border-color .15s,color .15s}
+.area-tab:hover{background:#f0f4f8}
+.area-tab.active{background:#00ADB5;border-color:#00ADB5;color:#fff;box-shadow:0 2px 8px rgba(0,173,181,.25)}
+.area-tab .tab-count{font-size:10.5px;font-weight:700;background:rgba(0,0,0,.07);border-radius:20px;padding:1px 7px}
+.area-tab.active .tab-count{background:rgba(255,255,255,.25)}
+.area-tab.add{border-style:dashed;color:#00ADB5;background:transparent}
+.area-tab.add:hover{background:rgba(0,173,181,.08)}
+.area-actions{display:flex;align-items:center;gap:5px}
+.area-desc{font-size:11.5px;color:#94a3b8;margin-right:6px}
+
+/* ── Floor plan ────────────────────────────────────── */
+.plan-layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:16px;padding:18px 20px}
+.plan-stage{background:#f8fafc;border:1px solid #eef2f7;border-radius:12px;padding:22px;display:flex;justify-content:flex-start;align-items:flex-start;overflow:auto;min-height:320px}
+.plan-canvas{position:relative;width:100%;margin:0 auto;flex-shrink:0;background:#fff;border:1.5px dashed #cfd8e3;border-radius:10px;container-type:inline-size;box-shadow:0 2px 10px rgba(0,0,0,.05)}
+
+/* Canvas resize handle (whole floor plan) */
+.canvas-handle{position:absolute;right:-11px;bottom:-11px;width:22px;height:22px;background:#00ADB5;border:3px solid #fff;border-radius:50%;cursor:nwse-resize;box-shadow:0 2px 8px rgba(0,0,0,.3);z-index:30;touch-action:none}
+.canvas-handle:hover{background:#008C9E}
+.canvas-size{position:absolute;right:16px;bottom:8px;background:#1a2433;color:#fff;font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:20px;z-index:29;pointer-events:none;opacity:.85}
+.plan-canvas.editing{border-color:#00ADB5;background-image:linear-gradient(rgba(0,173,181,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(0,173,181,.08) 1px,transparent 1px);background-size:5% 5%}
+.shelf{position:absolute;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:2px;padding:3px;overflow:hidden;background:#fff;border:1.5px solid #b6c4d4;border-radius:8px;cursor:pointer;user-select:none;transition:box-shadow .15s,border-color .15s,background .15s,transform .15s}
+.shelf:hover,.shelf.hl{border-color:#00ADB5;box-shadow:0 6px 18px rgba(0,173,181,.25);z-index:5;transform:translateY(-1px)}
+.shelf.has-meds{background:rgba(0,173,181,.08);border-color:#00ADB5}
+.shelf.alert{background:rgba(245,158,11,.1);border-color:#d97706}
+.shelf.landmark{background:#1a2433;border-color:#1a2433;cursor:default}
+.shelf.landmark:hover{transform:none;box-shadow:none}
+.shelf-code{font-size:clamp(8.5px,1.7cqw,13px);font-weight:700;color:#1a2433;line-height:1.2;word-break:break-word}
+.shelf-name{font-size:clamp(7.5px,1.3cqw,11px);color:#78909c;line-height:1.2}
+.shelf.landmark .shelf-code{color:#fff}.shelf.landmark .shelf-name{color:#b0bec5}
+.shelf-count{font-size:clamp(7.5px,1.3cqw,10.5px);font-weight:700;background:#00ADB5;color:#fff;border-radius:20px;padding:1px 7px;white-space:nowrap}
+.shelf-count.empty{background:#e8eef4;color:#78909c}
+.shelf-count.warn{background:#d97706}
+.shelf.pulse{animation:shelfPulse 1s ease 3;z-index:10}
+@keyframes shelfPulse{0%,100%{box-shadow:0 0 0 0 rgba(0,173,181,.55)}50%{box-shadow:0 0 0 10px rgba(0,173,181,0)}}
+.plan-canvas.editing .shelf{cursor:move;border-style:dashed;touch-action:none}
+.plan-canvas.editing .shelf.landmark{cursor:move}
+.shelf.dragging{opacity:.85;z-index:20;box-shadow:0 10px 26px rgba(0,0,0,.2)}
+.resize-handle{position:absolute;right:0;bottom:0;width:14px;height:14px;background:#00ADB5;border-top-left-radius:6px;cursor:nwse-resize}
+.edit-banner{display:none;margin:14px 20px 0}
+.edit-banner.show{display:flex}
+.plan-empty{text-align:center;padding:60px 20px;color:#90a4ae;font-size:13.5px}
+.plan-empty i{display:block;font-size:38px;margin-bottom:12px;color:#d1d9e0}
+
+/* Side list */
+.plan-side{border:1px solid #eef2f7;border-radius:12px;overflow:hidden;align-self:start}
+.plan-side-header{display:flex;align-items:center;gap:8px;padding:12px 14px;background:#fafbfc;border-bottom:1px solid #f0f4f8;font-size:12.5px;font-weight:700;color:#1a2433}
+.plan-side-header i{color:#00ADB5}
+.loc-list{max-height:520px;overflow-y:auto}
+.loc-item{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #f4f7fb;cursor:pointer;transition:background .15s}
+.loc-item:last-child{border-bottom:none}.loc-item:hover{background:#f8fafc}
+.loc-item-main{flex:1;min-width:0}
+.loc-item-code{font-size:12.5px;font-weight:700;color:#1a2433}
+.loc-item-sub{font-size:11px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.loc-pill{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:rgba(0,173,181,.1);color:#00ADB5;flex-shrink:0}
+.loc-pill.zero{background:#eef2f7;color:#94a3b8}.loc-pill.warn{background:rgba(245,158,11,.12);color:#d97706}
+.loc-pill.landmark{background:#1a2433;color:#fff}
+
+/* Legend */
+.legend{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:0 20px 18px;font-size:11.5px;color:#78909c}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:4px;border:1.5px solid #b6c4d4;background:#fff;display:inline-block}
+.legend i.has{background:rgba(0,173,181,.08);border-color:#00ADB5}
+.legend i.warn{background:rgba(245,158,11,.1);border-color:#d97706}
+.legend i.dark{background:#1a2433;border-color:#1a2433}
+
+/* ── Buttons / badges (shared look with Inventory) ─── */
+.btn-icon{width:30px;height:30px;border-radius:7px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;transition:background .15s,transform .15s;flex-shrink:0}
+.btn-icon:hover{transform:translateY(-1px)}
+.btn-icon.edit{background:rgba(0,173,181,.1);color:#00ADB5}.btn-icon.edit:hover{background:rgba(0,173,181,.2)}
+.btn-icon.delete{background:rgba(239,68,68,.1);color:#dc2626}.btn-icon.delete:hover{background:rgba(239,68,68,.2)}
+.btn-icon.sm{width:26px;height:26px;font-size:11px}
+.stock-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap}
+.stock-badge.in-stock{background:rgba(34,197,94,.1);color:#16a34a}
+.stock-badge.low-stock{background:rgba(245,158,11,.1);color:#d97706}
+.stock-badge.out-stock{background:rgba(239,68,68,.1);color:#dc2626}
+.stock-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+.in-stock .stock-dot{background:#16a34a}.low-stock .stock-dot{background:#d97706}.out-stock .stock-dot{background:#dc2626}
+.expiry-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:2px 7px;border-radius:6px}
+.expiry-badge.ok{color:#64748b}.expiry-badge.soon{background:rgba(245,158,11,.1);color:#d97706}.expiry-badge.expired{background:rgba(239,68,68,.1);color:#dc2626}
+.s2-chip{display:inline-flex;align-items:center;gap:3px;background:rgba(139,92,246,.1);color:#7c3aed;border:1px solid rgba(139,92,246,.2);border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:5px;vertical-align:middle}
+
+/* Medicines table inside modal */
+.data-table{width:100%;border-collapse:collapse}
+.data-table thead th{background:#f8fafc;padding:10px 14px;text-align:left;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#78909c;border-bottom:1px solid #eef2f7;white-space:nowrap}
+.data-table tbody tr{border-bottom:1px solid #f4f7fb;transition:background .15s}
+.data-table tbody tr:hover{background:#f8fafc}
+.data-table td{padding:10px 14px;font-size:12.5px;color:#1a2433;vertical-align:middle}
+.med-name{font-weight:600;color:#1a2433}.med-sub{font-size:11px;color:#94a3b8;margin-top:1px}
+.med-link{color:inherit;text-decoration:none}.med-link:hover{color:#00ADB5}
+.meds-summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.sum-chip{display:flex;align-items:center;gap:7px;background:#f8fafc;border:1px solid #eef2f7;border-radius:10px;padding:8px 14px;font-size:12px;color:#78909c}
+.sum-chip strong{font-size:16px;color:#1a2433}
+.sum-chip.warn strong{color:#d97706}
+.loc-notes{font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;margin-bottom:12px}
+.empty-state{text-align:center;padding:40px 20px}
+.empty-state i{font-size:34px;margin-bottom:10px;display:block;color:#d1d9e0}
+.empty-state p{font-size:13px;color:#90a4ae}
+
+/* ── Modal ─────────────────────────────────────────── */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(13,27,42,.55);backdrop-filter:blur(4px);z-index:2000;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex;align-items:flex-start;padding:20px;overflow-y:auto}
+.modal{background:#fff;border-radius:16px;width:100%;max-width:560px;max-height:calc(100vh - 40px);min-height:0;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2);animation:modalIn .25s cubic-bezier(.34,1.56,.64,1) both;overflow:hidden;margin:auto}
+@keyframes modalIn{from{opacity:0;transform:scale(.92) translateY(16px)}to{opacity:1;transform:scale(1) translateY(0)}}
+.modal-header{display:flex;align-items:center;justify-content:space-between;padding:18px 22px 14px;border-bottom:1px solid #f0f4f8;flex-shrink:0}
+.modal-title{font-size:15px;font-weight:700;color:#1a2433;display:flex;align-items:center;gap:9px}
+.modal-title i{color:#00ADB5;font-size:14px}
+.modal-sub{font-size:11.5px;color:#94a3b8;font-weight:500;margin-top:2px}
+.modal-close{width:30px;height:30px;border-radius:8px;border:none;background:#f0f4f8;color:#78909c;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;transition:background .15s}
+.modal-close:hover{background:#e0e6ed;color:#1a2433}
+.modal-body{padding:20px 22px;overflow-y:auto;flex:1;min-height:0;max-height:calc(100vh - 170px)}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-group{display:flex;flex-direction:column;gap:4px}
+.form-label{font-size:11.5px;font-weight:600;color:#64748b;letter-spacing:.3px}
+.form-control{width:100%;padding:8px 11px;border:1px solid #e0e6ed;border-radius:8px;font-size:12.5px;font-family:'Poppins',sans-serif;color:#1a2433;outline:none;background:#f8fafc;transition:border-color .2s,box-shadow .2s;box-sizing:border-box}
+.form-control:focus{border-color:#00ADB5;box-shadow:0 0 0 3px rgba(0,173,181,.1);background:#fff}
+select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
+.modal-footer{display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:14px 22px;border-top:1px solid #f0f4f8;background:#fafbfc;flex-shrink:0}
+.btn-cancel{padding:8px 18px;border-radius:8px;border:1px solid #e0e6ed;background:#fff;color:#64748b;font-size:12.5px;font-weight:600;font-family:'Poppins',sans-serif;cursor:pointer}
+.btn-cancel:hover{background:#f0f4f8}
+.btn-submit{padding:8px 22px;border-radius:8px;border:none;background:#00ADB5;color:#fff;font-size:12.5px;font-weight:600;font-family:'Poppins',sans-serif;cursor:pointer;box-shadow:0 2px 8px rgba(0,173,181,.25)}
+.btn-submit:hover{background:#008C9E}
+.btn-danger{padding:8px 20px;border-radius:8px;border:none;background:#dc2626;color:#fff;font-size:12.5px;font-weight:600;font-family:'Poppins',sans-serif;cursor:pointer}
+.btn-danger:hover{background:#b91c1c}
+.btn-soft{padding:8px 16px;border-radius:8px;border:1px solid rgba(0,173,181,.25);background:rgba(0,173,181,.08);color:#00ADB5;font-size:12.5px;font-weight:600;font-family:'Poppins',sans-serif;cursor:pointer}
+.btn-soft:hover{background:rgba(0,173,181,.16)}
+.btn-soft.red{border-color:rgba(239,68,68,.25);background:rgba(239,68,68,.08);color:#dc2626}
+.btn-soft.red:hover{background:rgba(239,68,68,.16)}
+.modal.modal-sm{max-width:380px}
+.delete-body{padding:24px;text-align:center}
+.delete-icon{width:54px;height:54px;border-radius:50%;background:rgba(239,68,68,.1);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:20px;color:#dc2626}
+.delete-title{font-size:15px;font-weight:700;color:#1a2433;margin-bottom:5px}
+.delete-msg{font-size:12.5px;color:#78909c;line-height:1.5}.delete-msg strong{color:#1a2433}
+.info-note{display:flex;align-items:flex-start;gap:9px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;font-size:12px;color:#92400e;margin-top:14px}
+.info-note i{color:#d97706;margin-top:1px;flex-shrink:0}
+.info-note.teal{background:rgba(0,173,181,.06);border-color:rgba(0,173,181,.25);color:#007c83;margin-top:0}
+.info-note.teal i{color:#00ADB5}
+
+.toast{position:fixed;bottom:26px;right:26px;background:#1a2433;color:#fff;padding:11px 16px;border-radius:10px;font-size:12.5px;font-weight:500;display:flex;align-items:center;gap:9px;box-shadow:0 8px 24px rgba(0,0,0,.2);z-index:9999;transform:translateY(70px);opacity:0;transition:transform .3s cubic-bezier(.34,1.56,.64,1),opacity .3s;pointer-events:none;max-width:360px}
+.toast.show{transform:translateY(0);opacity:1}.toast.success i{color:#4ade80}.toast.error i{color:#f87171}
+
+@media (max-width:1100px){
+    .plan-layout{grid-template-columns:1fr}
+    .stats-row{grid-template-columns:repeat(2,1fr)}
+}
+</style>
+{% endblock %}
+
+
+{% block content %}
+
+<!-- Summary Cards -->
+<div class="stats-row">
+    <div class="stat-card">
+        <div class="stat-icon teal"><i class="fas fa-map"></i></div>
+        <div class="stat-info"><span class="stat-value">{{ area_count }}</span><span class="stat-label">Areas</span></div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon purple"><i class="fas fa-table-cells-large"></i></div>
+        <div class="stat-info"><span class="stat-value">{{ shelf_count }}</span><span class="stat-label">Storage Locations</span></div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon green"><i class="fas fa-box-archive"></i></div>
+        <div class="stat-info"><span class="stat-value">{{ used_count }}</span><span class="stat-label">Locations In Use</span></div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon orange"><i class="fas fa-pills"></i></div>
+        <div class="stat-info"><span class="stat-value">{{ med_count }}</span><span class="stat-label">Medicines Placed</span></div>
+    </div>
+</div>
+
+<div class="table-card">
+    <div class="table-toolbar">
+        <div class="toolbar-left">
+            <span class="table-title">Floor Plan</span>
+            <span class="count-badge" id="areaBadge">—</span>
+        </div>
+        <div class="toolbar-right">
+            <div class="find-wrap">
+                <div class="search-box">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="findInput" placeholder="Where is this medicine?" autocomplete="off" oninput="debounceFind(this.value)">
+                </div>
+                <div class="find-results" id="findResults"></div>
+            </div>
+            {% if can_manage %}
+            <button class="btn-scan" id="btnEdit" onclick="toggleEdit(true)"><i class="fas fa-up-down-left-right"></i> Edit Layout</button>
+            <button class="btn-scan active" id="btnCancel" style="display:none" onclick="cancelEdit()"><i class="fas fa-xmark"></i> Cancel</button>
+            <button class="btn-add" id="btnSave" style="display:none" onclick="saveLayout()"><i class="fas fa-floppy-disk"></i> Save Layout</button>
+            <button class="btn-add" id="btnAddLoc" onclick="openLocModal()"><i class="fas fa-plus"></i> Add Location</button>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Area tabs -->
+    <div class="area-bar">
+        <div class="area-tabs" id="areaTabs"></div>
+        <div class="area-actions" id="areaActions"></div>
+    </div>
+
+    {% if can_manage %}
+    <div class="info-note teal edit-banner" id="editBanner">
+        <i class="fas fa-circle-info"></i>
+        <span><strong>Layout editing is on.</strong> Drag a box to move it, drag its teal corner to resize it, or drag the round handle on the plan's corner to resize the whole floor plan. Click <strong>Save Layout</strong> when you're done.</span>
+    </div>
+    {% endif %}
+
+    <div class="plan-layout">
+        <div class="plan-stage"><div class="plan-canvas" id="planCanvas"></div></div>
+        <aside class="plan-side">
+            <div class="plan-side-header"><i class="fas fa-list-ul"></i> Locations in this area <span class="count-badge" id="sideCount" style="margin-left:auto">0</span></div>
+            <div class="loc-list" id="locList"></div>
+        </aside>
+    </div>
+
+    <div class="legend">
+        <span><i></i> Empty</span>
+        <span><i class="has"></i> Has medicines</span>
+        <span><i class="warn"></i> Has low / out-of-stock medicines</span>
+        <span><i class="dark"></i> Landmark (not storage)</span>
+    </div>
+</div>
+
+
+<!-- ── MEDICINES IN LOCATION ─────────────────────────────── -->
+<div class="modal-overlay" id="medsModal">
+    <div class="modal" style="max-width:780px">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title"><i class="fas fa-location-dot"></i><span id="medsTitle">Location</span></div>
+                <div class="modal-sub" id="medsSub"></div>
+            </div>
+            <button class="modal-close" onclick="closeModal('medsModal')"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <div class="meds-summary" id="medsSummary"></div>
+            <div id="medsNotes"></div>
+            <div class="search-box" style="margin-bottom:12px;width:100%">
+                <i class="fas fa-search"></i>
+                <input type="text" id="medsFilter" placeholder="Filter medicines in this location…" autocomplete="off" oninput="filterMeds(this.value)" style="width:100%">
+            </div>
+            <div id="medsList"></div>
+        </div>
+        <div class="modal-footer">
+            {% if can_admin %}<button type="button" class="btn-soft red" id="medsDelete" style="margin-right:auto"><i class="fas fa-trash-can"></i> Remove</button>{% endif %}
+            {% if can_manage %}<button type="button" class="btn-soft" id="medsEdit"><i class="fas fa-pen-to-square"></i> Edit Location</button>{% endif %}
+            <button type="button" class="btn-cancel" onclick="closeModal('medsModal')">Close</button>
+        </div>
+    </div>
+</div>
+
+{% if can_manage %}
+<!-- ── ADD / EDIT LOCATION ───────────────────────────────── -->
+<div class="modal-overlay" id="locModal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title"><i class="fas fa-plus-circle" id="locIcon"></i><span id="locModalTitle">Add Storage Location</span></div>
+            <button class="modal-close" onclick="closeModal('locModal')"><i class="fas fa-xmark"></i></button>
+        </div>
+        <form method="POST" id="locForm" action="">{% csrf_token %}
+            <div class="modal-body">
+                <div class="form-grid">
+                    <div class="form-group"><label class="form-label">Area *</label><select name="area" id="l_area" class="form-control" required></select></div>
+                    <div class="form-group"><label class="form-label">Code *</label><input type="text" name="code" id="l_code" class="form-control" maxlength="30" required placeholder="e.g. SR1-G5"></div>
+                    <div class="form-group"><label class="form-label">Display Name</label><input type="text" name="name" id="l_name" class="form-control" maxlength="80" placeholder="Optional, e.g. Antibiotics"></div>
+                    <div class="form-group"><label class="form-label">Type</label>
+                        <select name="kind" id="l_kind" class="form-control">{% for val,label in kind_choices %}<option value="{{ val }}">{{ label }}</option>{% endfor %}</select>
+                    </div>
+                    <div class="form-group" style="grid-column:span 2;"><label class="form-label">Notes</label><textarea name="notes" id="l_notes" class="form-control" rows="2" placeholder="Optional, e.g. keep refrigerated 2–8°C"></textarea></div>
+                </div>
+                <div class="info-note" id="locNote"><i class="fas fa-circle-info"></i><span>After saving, you'll be taken to Edit Layout so you can drag the new location to its exact spot on the floor plan.</span></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-cancel" onclick="closeModal('locModal')">Cancel</button>
+                <button type="submit" class="btn-submit" id="locSubmit"><i class="fas fa-plus" style="margin-right:5px"></i>Add Location</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ── ADD / EDIT AREA ───────────────────────────────────── -->
+<div class="modal-overlay" id="areaModal">
+    <div class="modal modal-sm" style="max-width:440px">
+        <div class="modal-header">
+            <div class="modal-title"><i class="fas fa-map"></i><span id="areaModalTitle">Add Area</span></div>
+            <button class="modal-close" onclick="closeModal('areaModal')"><i class="fas fa-xmark"></i></button>
+        </div>
+        <form method="POST" id="areaForm" action="">{% csrf_token %}
+            <div class="modal-body">
+                <div class="form-group" style="margin-bottom:12px"><label class="form-label">Area Name *</label><input type="text" name="name" id="a_name" class="form-control" maxlength="80" required placeholder="e.g. Stock Room 3"></div>
+                <div class="form-group" style="margin-bottom:12px"><label class="form-label">Description</label><input type="text" name="description" id="a_desc" class="form-control" maxlength="200"></div>
+                <div class="form-group" id="a_orient_wrap"><label class="form-label">Floor Plan Shape</label>
+                    <select name="orientation" class="form-control">
+                        <option value="landscape">Landscape (wide room)</option>
+                        <option value="portrait">Portrait (tall room)</option>
+                        <option value="square">Square</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-cancel" onclick="closeModal('areaModal')">Cancel</button>
+                <button type="submit" class="btn-submit" id="areaSubmit">Add Area</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+<!-- ── DELETE ────────────────────────────────────────────── -->
+<div class="modal-overlay" id="deleteModal">
+    <div class="modal modal-sm">
+        <div class="delete-body">
+            <div class="delete-icon"><i class="fas fa-trash-can"></i></div>
+            <div class="delete-title" id="deleteTitle">Remove</div>
+            <p class="delete-msg" id="deleteMsg"></p>
+        </div>
+        <form method="POST" id="deleteForm" action="">{% csrf_token %}
+            <div class="modal-footer" style="justify-content:center;gap:12px;">
+                <button type="button" class="btn-cancel" onclick="closeModal('deleteModal')">Cancel</button>
+                <button type="submit" class="btn-danger"><i class="fas fa-trash-can" style="margin-right:5px"></i>Yes, Remove</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="toast" id="toast"><i class="fas fa-circle-check"></i><span id="toastMsg"></span></div>
+{% endblock %}
+
+
+{% block extra_js %}
+{{ plan_data|json_script:"plan-data" }}
+{{ initial|json_script:"plan-initial" }}
+<script>
+var PLAN    = JSON.parse(document.getElementById('plan-data').textContent);
+var INITIAL = JSON.parse(document.getElementById('plan-initial').textContent);
+var CAN_MANAGE = {% if can_manage %}true{% else %}false{% endif %};
+var CAN_ADMIN  = {% if can_admin %}true{% else %}false{% endif %};
+var CSRF = '{{ csrf_token }}';
+var URLS = {
+    inventory:     "{% url 'inventory' %}",
+    meds:          "{% url 'storage_location_medicines' pk=0 %}",
+    find:          "{% url 'storage_find' %}",
+    layout:        "{% url 'storage_location_layout' %}",
+    area_create:   "{% url 'storage_area_create' %}",
+    area_update:   "{% url 'storage_area_update' pk=0 %}",
+    area_delete:   "{% url 'storage_area_delete' pk=0 %}",
+    loc_create:    "{% url 'storage_location_create' %}",
+    loc_update:    "{% url 'storage_location_update' pk=0 %}",
+    loc_delete:    "{% url 'storage_location_delete' pk=0 %}"
+};
+function u(tpl, pk) { var i = tpl.lastIndexOf('/0/'); return tpl.slice(0, i) + '/' + pk + '/' + tpl.slice(i + 3); }
+function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+}
+
+var state = { areaId: null, edit: false, currentLoc: null, medsRows: [] };
+
+function areaById(id) { for (var i = 0; i < PLAN.length; i++) if (PLAN[i].id === id) return PLAN[i]; return null; }
+function curArea() { return areaById(state.areaId); }
+function locById(id) {
+    for (var i = 0; i < PLAN.length; i++)
+        for (var j = 0; j < PLAN[i].locations.length; j++)
+            if (PLAN[i].locations[j].id === id) return PLAN[i].locations[j];
+    return null;
+}
+function areaOfLoc(id) {
+    for (var i = 0; i < PLAN.length; i++)
+        for (var j = 0; j < PLAN[i].locations.length; j++)
+            if (PLAN[i].locations[j].id === id) return PLAN[i];
+    return null;
+}
+function shelvesIn(a) { return a.locations.filter(function(l) { return l.kind === 'shelf'; }); }
+
+/* ── Modal helpers ─────────────────────────────────────── */
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(function(o) {
+    o.addEventListener('click', function(e) { if (e.target === o) o.classList.remove('open'); });
+});
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') document.querySelectorAll('.modal-overlay.open').forEach(function(o) { o.classList.remove('open'); });
+});
+
+/* ── Rendering ─────────────────────────────────────────── */
+function renderTabs() {
+    var html = PLAN.map(function(a) {
+        return '<button type="button" class="area-tab' + (a.id === state.areaId ? ' active' : '') + '" onclick="selectArea(' + a.id + ')">' +
+               esc(a.name) + '<span class="tab-count">' + shelvesIn(a).length + '</span></button>';
+    }).join('');
+    if (CAN_MANAGE) html += '<button type="button" class="area-tab add" onclick="openAreaModal(false)"><i class="fas fa-plus"></i> Add Area</button>';
+    document.getElementById('areaTabs').innerHTML = html;
+
+    var a = curArea(), act = '';
+    if (a) {
+        if (a.description) act += '<span class="area-desc">' + esc(a.description) + '</span>';
+        if (CAN_MANAGE) act += '<button type="button" class="btn-icon edit" title="Edit area" onclick="openAreaModal(true)"><i class="fas fa-pen-to-square"></i></button>';
+        if (CAN_ADMIN)  act += '<button type="button" class="btn-icon delete" title="Remove area" onclick="openDeleteArea()"><i class="fas fa-trash-can"></i></button>';
+    }
+    document.getElementById('areaActions').innerHTML = act;
+}
+
+var CANVAS_MIN_W = 360, CANVAS_MIN_H = 240, CANVAS_MAX_W = 2400, CANVAS_MAX_H = 1800;
+var dirtyCanvas = {};
+
+function applyCanvasSize(a) {
+    var c = document.getElementById('planCanvas');
+    c.style.aspectRatio = a.canvas_w + ' / ' + a.canvas_h;
+    if (state.edit) { c.style.width = a.canvas_w + 'px'; c.style.maxWidth = 'none'; }
+    else            { c.style.width = '';                c.style.maxWidth = a.canvas_w + 'px'; }
+    var b = document.getElementById('canvasSize');
+    if (b) b.textContent = a.canvas_w + ' × ' + a.canvas_h;
+}
+
+function addCanvasHandle(canvas, a) {
+    if (!state.edit) return;
+    var badge = document.createElement('span');
+    badge.className = 'canvas-size'; badge.id = 'canvasSize';
+    var h = document.createElement('span');
+    h.className = 'canvas-handle'; h.title = 'Drag to resize the whole floor plan';
+    canvas.appendChild(badge);
+    canvas.appendChild(h);
+}
+
+function renderCanvas() {
+    var canvas = document.getElementById('planCanvas');
+    var a = curArea();
+    canvas.innerHTML = '';
+    canvas.classList.toggle('editing', state.edit);
+    if (!a) {
+        canvas.style.aspectRatio = 'auto'; canvas.style.maxWidth = 'none'; canvas.style.width = ''; canvas.style.border = 'none';
+        canvas.innerHTML = '<div class="plan-empty"><i class="fas fa-map"></i>No floor plans yet.' +
+            (CAN_MANAGE ? '<br>Click <strong>Add Area</strong> to create your first room.' : '') + '</div>';
+        return;
+    }
+    canvas.style.border = '';
+
+    if (!a.locations.length) {
+        canvas.innerHTML = '<div class="plan-empty"><i class="fas fa-table-cells-large"></i>No locations drawn in this area yet.' +
+            (CAN_MANAGE ? '<br>Click <strong>Add Location</strong> to place your first shelf.' : '') + '</div>';
+    }
+    a.locations.forEach(function(l) {
+        var el = document.createElement('div');
+        var cls = 'shelf';
+        if (l.kind === 'landmark') cls += ' landmark';
+        else { if (l.count) cls += ' has-meds'; if (l.alert) cls += ' alert'; }
+        el.className = cls;
+        el.id = 'shelf-' + l.id;
+        el.dataset.id = l.id;
+        placeShelf(el, l);
+        var inner = '<span class="shelf-code">' + esc(l.code) + '</span>';
+        if (l.name && l.name !== l.code) inner += '<span class="shelf-name">' + esc(l.name) + '</span>';
+        if (l.kind === 'shelf') {
+            inner += '<span class="shelf-count' + (l.count ? (l.alert ? ' warn' : '') : ' empty') + '">' +
+                     l.count + ' med' + (l.count === 1 ? '' : 's') + '</span>';
+        }
+        el.innerHTML = inner;
+        if (state.edit) {
+            var h = document.createElement('span');
+            h.className = 'resize-handle';
+            el.appendChild(h);
+        }
+        el.addEventListener('click', function() {
+            if (state.edit || l.kind === 'landmark') return;
+            openMeds(l.id);
+        });
+        canvas.appendChild(el);
+    });
+    addCanvasHandle(canvas, a);
+    applyCanvasSize(a);
+}
+
+function placeShelf(el, l) {
+    el.style.left = l.x + '%'; el.style.top = l.y + '%';
+    el.style.width = l.w + '%'; el.style.height = l.h + '%';
+}
+
+function renderList() {
+    var a = curArea(), list = document.getElementById('locList');
+    document.getElementById('sideCount').textContent = a ? a.locations.length : 0;
+    document.getElementById('areaBadge').textContent = a ? (shelvesIn(a).length + ' storage location' + (shelvesIn(a).length === 1 ? '' : 's')) : '—';
+    if (!a || !a.locations.length) {
+        list.innerHTML = '<div class="empty-state"><i class="fas fa-table-cells-large"></i><p>Nothing here yet.</p></div>';
+        return;
+    }
+    list.innerHTML = a.locations.map(function(l) {
+        var pill = l.kind === 'landmark'
+            ? '<span class="loc-pill landmark">Landmark</span>'
+            : '<span class="loc-pill' + (l.count ? (l.alert ? ' warn' : '') : ' zero') + '">' + l.count + '</span>';
+        var btns = '';
+        if (CAN_MANAGE) btns += '<button type="button" class="btn-icon edit sm" title="Edit" onclick="event.stopPropagation();openLocModal(' + l.id + ')"><i class="fas fa-pen-to-square"></i></button>';
+        if (CAN_ADMIN)  btns += '<button type="button" class="btn-icon delete sm" title="Remove" onclick="event.stopPropagation();openDeleteLoc(' + l.id + ')"><i class="fas fa-trash-can"></i></button>';
+        return '<div class="loc-item" data-id="' + l.id + '" onclick="listClick(' + l.id + ')" onmouseenter="hlShelf(' + l.id + ',true)" onmouseleave="hlShelf(' + l.id + ',false)">' +
+               '<div class="loc-item-main"><div class="loc-item-code">' + esc(l.code) + '</div>' +
+               '<div class="loc-item-sub">' + esc(l.name || (l.kind === 'landmark' ? 'Not a storage location' : 'No display name')) + '</div></div>' +
+               pill + btns + '</div>';
+    }).join('');
+}
+
+function hlShelf(id, on) {
+    var el = document.getElementById('shelf-' + id);
+    if (el) el.classList.toggle('hl', on);
+}
+function listClick(id) {
+    var l = locById(id);
+    pulseShelf(id);
+    if (!state.edit && l && l.kind === 'shelf') openMeds(id);
+}
+function pulseShelf(id) {
+    var el = document.getElementById('shelf-' + id);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse');
+    setTimeout(function() { el.classList.remove('pulse'); }, 3200);
+}
+
+function selectArea(id) {
+    state.areaId = id;
+    renderTabs(); renderCanvas(); renderList();
+}
+function refreshAll() { renderTabs(); renderCanvas(); renderList(); }
+
+/* ── Medicines modal ───────────────────────────────────── */
+function openMeds(id) {
+    var l = locById(id), a = areaOfLoc(id);
+    if (!l) return;
+    state.currentLoc = id;
+    document.getElementById('medsTitle').textContent = l.code + (l.name && l.name !== l.code ? ' — ' + l.name : '');
+    document.getElementById('medsSub').textContent = a ? a.name : '';
+    document.getElementById('medsSummary').innerHTML = '';
+    document.getElementById('medsNotes').innerHTML = l.notes ? '<div class="loc-notes"><i class="fas fa-note-sticky"></i> ' + esc(l.notes) + '</div>' : '';
+    document.getElementById('medsFilter').value = '';
+    document.getElementById('medsList').innerHTML = '<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading…</p></div>';
+
+    var edit = document.getElementById('medsEdit'), del = document.getElementById('medsDelete');
+    if (edit) edit.onclick = function() { closeModal('medsModal'); openLocModal(id); };
+    if (del)  del.onclick  = function() { closeModal('medsModal'); openDeleteLoc(id); };
+    openModal('medsModal');
+
+    fetch(u(URLS.meds, id), { credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            state.medsRows = data.medicines;
+            var out = 0, low = 0, units = 0;
+            data.medicines.forEach(function(m) { units += Number(m.qty) || 0; if (m.status === 'out') out++; if (m.status === 'low') low++; });
+            document.getElementById('medsSummary').innerHTML =
+                '<div class="sum-chip"><strong>' + data.medicines.length + '</strong> medicine' + (data.medicines.length === 1 ? '' : 's') + '</div>' +
+                '<div class="sum-chip"><strong>' + units + '</strong> total units</div>' +
+                ((low + out) ? '<div class="sum-chip warn"><strong>' + (low + out) + '</strong> low / out of stock</div>' : '');
+            renderMeds('');
+        })
+        .catch(function() {
+            document.getElementById('medsList').innerHTML = '<div class="empty-state"><i class="fas fa-triangle-exclamation"></i><p>Could not load medicines.</p></div>';
+        });
+}
+
+function renderMeds(q) {
+    q = (q || '').toLowerCase().trim();
+    var rows = state.medsRows.filter(function(m) {
+        return !q || (m.name + ' ' + m.generic + ' ' + m.brand + ' ' + m.strength).toLowerCase().indexOf(q) !== -1;
+    });
+    var box = document.getElementById('medsList');
+    if (!rows.length) {
+        box.innerHTML = '<div class="empty-state"><i class="fas fa-pills"></i><p>' +
+            (state.medsRows.length ? 'No medicines match your filter.' : 'No medicines are stored here yet.<br>Assign this location when adding or editing a medicine in Inventory.') + '</p></div>';
+        return;
+    }
+    var html = '<table class="data-table"><thead><tr><th>Medicine</th><th>Form</th><th>Stock</th><th>Status</th><th>Earliest Expiry</th></tr></thead><tbody>';
+    rows.forEach(function(m) {
+        var cls = m.status === 'out' ? 'out-stock' : (m.status === 'low' ? 'low-stock' : 'in-stock');
+        var txt = m.status === 'out' ? 'Out of Stock' : (m.status === 'low' ? 'Low Stock' : 'In Stock');
+        var color = m.status === 'out' ? '#dc2626' : (m.status === 'low' ? '#d97706' : '#16a34a');
+        var sub = [m.generic, m.brand, m.strength].filter(Boolean).join(' · ');
+        html += '<tr><td><div class="med-name"><a class="med-link" href="' + URLS.inventory + '?highlight=' + m.id + '" title="Open in Inventory">' + esc(m.name) + '</a>' +
+                (m.s2 ? '<span class="s2-chip"><i class="fas fa-shield-halved" style="font-size:9px"></i> S2</span>' : '') + '</div>' +
+                '<div class="med-sub">' + esc(sub) + '</div></td>' +
+                '<td style="color:#64748b">' + esc(m.form || '—') + '</td>' +
+                '<td style="font-weight:700;color:' + color + '">' + esc(m.qty) + '</td>' +
+                '<td><span class="stock-badge ' + cls + '"><span class="stock-dot"></span>' + txt + '</span></td>' +
+                '<td>' + (m.expiry ? '<span class="expiry-badge ' + m.expiry_state + '">' + esc(m.expiry) + '</span>' : '<span style="font-size:11.5px;color:#b0bec5">No expiry set</span>') + '</td></tr>';
+    });
+    box.innerHTML = html + '</tbody></table>';
+}
+function filterMeds(q) { renderMeds(q); }
+
+/* ── Add / Edit location ───────────────────────────────── */
+function openLocModal(id) {
+    if (!CAN_MANAGE) return;
+    var l = id ? locById(id) : null;
+    var sel = document.getElementById('l_area');
+    sel.innerHTML = PLAN.map(function(a) { return '<option value="' + a.id + '">' + esc(a.name) + '</option>'; }).join('');
+    if (!PLAN.length) { showToast('Add an area first.', 'error'); openAreaModal(false); return; }
+
+    var form = document.getElementById('locForm');
+    if (l) {
+        form.action = u(URLS.loc_update, l.id);
+        document.getElementById('locModalTitle').textContent = 'Edit Location';
+        document.getElementById('locIcon').className = 'fas fa-pen-to-square';
+        document.getElementById('locSubmit').innerHTML = '<i class="fas fa-floppy-disk" style="margin-right:5px"></i>Save Changes';
+        document.getElementById('locNote').style.display = 'none';
+        sel.value = areaOfLoc(l.id).id;
+        document.getElementById('l_code').value  = l.code;
+        document.getElementById('l_name').value  = l.name || '';
+        document.getElementById('l_kind').value  = l.kind;
+        document.getElementById('l_notes').value = l.notes || '';
+    } else {
+        form.action = URLS.loc_create;
+        document.getElementById('locModalTitle').textContent = 'Add Storage Location';
+        document.getElementById('locIcon').className = 'fas fa-plus-circle';
+        document.getElementById('locSubmit').innerHTML = '<i class="fas fa-plus" style="margin-right:5px"></i>Add Location';
+        document.getElementById('locNote').style.display = '';
+        sel.value = state.areaId;
+        form.reset(); sel.value = state.areaId;
+    }
+    openModal('locModal');
+    setTimeout(function() { document.getElementById('l_code').focus(); }, 50);
+}
+
+/* ── Add / Edit area ───────────────────────────────────── */
+function openAreaModal(editing) {
+    if (!CAN_MANAGE) return;
+    var form = document.getElementById('areaForm'), a = curArea();
+    if (editing && a) {
+        form.action = u(URLS.area_update, a.id);
+        document.getElementById('areaModalTitle').textContent = 'Edit Area';
+        document.getElementById('areaSubmit').textContent = 'Save Changes';
+        document.getElementById('a_name').value = a.name;
+        document.getElementById('a_desc').value = a.description || '';
+        document.getElementById('a_orient_wrap').style.display = 'none';
+    } else {
+        form.action = URLS.area_create;
+        document.getElementById('areaModalTitle').textContent = 'Add Area';
+        document.getElementById('areaSubmit').textContent = 'Add Area';
+        form.reset();
+        document.getElementById('a_orient_wrap').style.display = '';
+    }
+    openModal('areaModal');
+    setTimeout(function() { document.getElementById('a_name').focus(); }, 50);
+}
+
+/* ── Delete ────────────────────────────────────────────── */
+function openDeleteLoc(id) {
+    var l = locById(id); if (!l) return;
+    document.getElementById('deleteForm').action = u(URLS.loc_delete, id);
+    document.getElementById('deleteTitle').textContent = 'Remove Location';
+    document.getElementById('deleteMsg').innerHTML = 'Remove <strong>' + esc(l.code) + '</strong> from the floor plan?' +
+        (l.count ? ' The <strong>' + l.count + '</strong> medicine' + (l.count === 1 ? '' : 's') + ' stored here will become unassigned.' : '');
+    openModal('deleteModal');
+}
+function openDeleteArea() {
+    var a = curArea(); if (!a) return;
+    var meds = 0; a.locations.forEach(function(l) { meds += l.count; });
+    document.getElementById('deleteForm').action = u(URLS.area_delete, a.id);
+    document.getElementById('deleteTitle').textContent = 'Remove Area';
+    document.getElementById('deleteMsg').innerHTML = meds
+        ? '<strong>' + esc(a.name) + '</strong> still has <strong>' + meds + '</strong> medicine' + (meds === 1 ? '' : 's') + ' assigned to its locations. Reassign them before removing this area.'
+        : 'Remove <strong>' + esc(a.name) + '</strong> and its ' + a.locations.length + ' location' + (a.locations.length === 1 ? '' : 's') + '?';
+    openModal('deleteModal');
+}
+
+/* ── Layout editing (drag + resize) ────────────────────── */
+var dirty = {};
+function snap(v) { return Math.round(v * 2) / 2; }   // 0.5 % grid
+function clamp(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
+
+function startCanvasResize(e) {
+    var a = curArea(); if (!a) return;
+    var handle = e.target;
+    var s = { x: e.clientX, y: e.clientY, w: a.canvas_w, h: a.canvas_h };
+    handle.setPointerCapture(e.pointerId);
+    e.preventDefault();
+
+    function onMove(ev) {
+        a.canvas_w = clamp(Math.round((s.w + ev.clientX - s.x) / 10) * 10, CANVAS_MIN_W, CANVAS_MAX_W);
+        a.canvas_h = clamp(Math.round((s.h + ev.clientY - s.y) / 10) * 10, CANVAS_MIN_H, CANVAS_MAX_H);
+        applyCanvasSize(a);
+        dirtyCanvas[a.id] = true;
+    }
+    function onUp() {
+        handle.removeEventListener('pointermove', onMove);
+        handle.removeEventListener('pointerup', onUp);
+        handle.removeEventListener('pointercancel', onUp);
+    }
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
+}
+
+function toggleEdit(on) {
+    if (!CAN_MANAGE) return;
+    state.edit = on;
+    document.getElementById('btnEdit').style.display   = on ? 'none' : '';
+    document.getElementById('btnAddLoc').style.display = on ? 'none' : '';
+    document.getElementById('btnCancel').style.display = on ? '' : 'none';
+    document.getElementById('btnSave').style.display   = on ? '' : 'none';
+    document.getElementById('editBanner').classList.toggle('show', on);
+    renderCanvas();
+}
+function cancelEdit() {
+    var url = new URL(window.location.href);
+    url.search = ''; if (state.areaId) url.searchParams.set('area', state.areaId);
+    window.location.href = url.toString();
+}
+function saveLayout() {
+    var items = [], canvases = [];
+    Object.keys(dirty).forEach(function(id) {
+        var l = locById(Number(id));
+        if (l) items.push({ id: l.id, x: l.x, y: l.y, w: l.w, h: l.h });
+    });
+    Object.keys(dirtyCanvas).forEach(function(id) {
+        var a = areaById(Number(id));
+        if (a) canvases.push({ id: a.id, w: a.canvas_w, h: a.canvas_h });
+    });
+    if (!items.length && !canvases.length) { toggleEdit(false); showToast('No changes to save.', 'success'); return; }
+    fetch(URLS.layout, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ positions: items, canvases: canvases })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+        if (d.ok) {
+            dirty = {}; dirtyCanvas = {}; toggleEdit(false);
+            showToast('Layout saved.', 'success');
+        } else showToast(d.error || 'Could not save layout.', 'error');
+    })
+    .catch(function() { showToast('Network error.', 'error'); });
+}
+
+document.getElementById('planCanvas').addEventListener('pointerdown', function(e) {
+    if (!state.edit) return;
+    if (e.target.classList.contains('canvas-handle')) { startCanvasResize(e); return; }   // ← NEW LINE
+    var shelfEl = e.target.closest('.shelf');
+    if (!shelfEl) return;
+    var l = locById(Number(shelfEl.dataset.id));
+    if (!l) return;
+    var canvas = document.getElementById('planCanvas');
+    var rect = canvas.getBoundingClientRect();
+    var mode = e.target.classList.contains('resize-handle') ? 'resize' : 'move';
+    var s = { x: e.clientX, y: e.clientY, lx: l.x, ly: l.y, lw: l.w, lh: l.h };
+    shelfEl.setPointerCapture(e.pointerId);
+    shelfEl.classList.add('dragging');
+    e.preventDefault();
+
+    function onMove(ev) {
+        var dx = (ev.clientX - s.x) / rect.width * 100;
+        var dy = (ev.clientY - s.y) / rect.height * 100;
+        if (mode === 'move') {
+            l.x = clamp(snap(s.lx + dx), 0, 100 - l.w);
+            l.y = clamp(snap(s.ly + dy), 0, 100 - l.h);
+        } else {
+            l.w = clamp(snap(s.lw + dx), 3, 100 - l.x);
+            l.h = clamp(snap(s.lh + dy), 3, 100 - l.y);
+        }
+        placeShelf(shelfEl, l);
+        dirty[l.id] = true;
+    }
+    function onUp() {
+        shelfEl.removeEventListener('pointermove', onMove);
+        shelfEl.removeEventListener('pointerup', onUp);
+        shelfEl.removeEventListener('pointercancel', onUp);
+        shelfEl.classList.remove('dragging');
+    }
+    shelfEl.addEventListener('pointermove', onMove);
+    shelfEl.addEventListener('pointerup', onUp);
+    shelfEl.addEventListener('pointercancel', onUp);
+});
+
+window.addEventListener('beforeunload', function(e) {
+    if (state.edit && (Object.keys(dirty).length || Object.keys(dirtyCanvas).length)) { e.preventDefault(); e.returnValue = ''; }
+});
+
+/* ── "Where is this medicine?" ─────────────────────────── */
+var findTimer;
+function debounceFind(q) {
+    clearTimeout(findTimer);
+    var box = document.getElementById('findResults');
+    if (q.trim().length < 2) { box.classList.remove('open'); return; }
+    findTimer = setTimeout(function() {
+        fetch(URLS.find + '?q=' + encodeURIComponent(q.trim()), { credentials: 'same-origin' })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (!d.results.length) {
+                    box.innerHTML = '<div class="find-empty">No placed medicine matches “' + esc(q) + '”.</div>';
+                } else {
+                    box.innerHTML = d.results.map(function(r) {
+                        return '<div class="find-item" onclick="goToLoc(' + r.area_id + ',' + r.loc_id + ')">' +
+                               '<div>' + esc(r.name) + '<small>' + esc(r.strength) + ' · ' + esc(r.area) + '</small></div>' +
+                               '<span class="find-loc">' + esc(r.code) + '</span></div>';
+                    }).join('');
+                }
+                box.classList.add('open');
+            });
+    }, 300);
+}
+function goToLoc(areaId, locId) {
+    document.getElementById('findResults').classList.remove('open');
+    selectArea(areaId);
+    setTimeout(function() { pulseShelf(locId); }, 80);
+}
+document.addEventListener('click', function(e) {
+    var w = document.querySelector('.find-wrap');
+    if (w && !w.contains(e.target)) document.getElementById('findResults').classList.remove('open');
+});
+
+/* ── Toast ─────────────────────────────────────────────── */
+function showToast(msg, type) {
+    type = type || 'success';
+    var toast = document.getElementById('toast');
+    toast.querySelector('i').className = type === 'success' ? 'fas fa-circle-check' : 'fas fa-circle-xmark';
+    document.getElementById('toastMsg').textContent = msg;
+    toast.className = 'toast ' + type;
+    toast.classList.add('show');
+    setTimeout(function() { toast.classList.remove('show'); }, 3200);
+}
+{% if messages %}{% for message in messages %}
+showToast("{{ message|escapejs }}", "{% if 'error' in message.tags %}error{% else %}success{% endif %}");
+{% endfor %}{% endif %}
+
+/* ── Init ──────────────────────────────────────────────── */
+(function init() {
+    var start = INITIAL.area;
+    if (INITIAL.focus) { var fa = areaOfLoc(INITIAL.focus); if (fa) start = fa.id; }
+    if (INITIAL.open)  { var oa = areaOfLoc(INITIAL.open);  if (oa) start = oa.id; }
+    if (!areaById(start)) start = PLAN.length ? PLAN[0].id : null;
+    state.areaId = start;
+    if (INITIAL.edit) state.edit = true;
+    refreshAll();
+    if (state.edit) toggleEdit(true);
+    if (INITIAL.focus) setTimeout(function() { pulseShelf(INITIAL.focus); }, 400);
+    if (INITIAL.open)  setTimeout(function() { openMeds(INITIAL.open); }, 400);
+})();
+</script>
+{% endblock %}

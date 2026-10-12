@@ -89,7 +89,7 @@ DATABASES = {
         'NAME': 'hospital',
         'USER': 'django_readonly',
         'PASSWORD': 'dj@ngo_re@d0nly',
-        'HOST': '192.168.2.21',
+        'HOST': '172.31.1.16',
         'PORT': '1433',
         'OPTIONS': {
             'driver': 'ODBC Driver 18 for SQL Server',

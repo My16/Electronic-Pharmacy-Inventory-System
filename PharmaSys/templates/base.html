@@ -58,6 +58,15 @@
         </a>
         {% endif %}
 
+        {% if perm.storage_locations %}
+        <a href="{% url 'storage_locations' %}"
+           class="nav-item {% block nav_storage %}{% endblock %}"
+           data-tooltip="Storage Locations">
+            <i class="fas fa-map-location-dot"></i>
+            <span class="nav-label">Storage Locations</span>
+        </a>
+        {% endif %}
+
         {% if perm.stock_management %}
         <a href="{% url 'stock_management' %}"
            class="nav-item {% block nav_stock %}{% endblock %}"

@@ -38,6 +38,7 @@ class UserProfile(models.Model):
 class UserPermission(models.Model):
     user               = models.OneToOneField(User, on_delete=models.CASCADE, related_name='permissions')
     inventory          = models.BooleanField(default=False)
+    storage_locations  = models.BooleanField(default=False)
     stock_management   = models.BooleanField(default=False)
     dispensing         = models.BooleanField(default=False)
     dispensing_card    = models.BooleanField(default=False)
@@ -48,6 +49,7 @@ class UserPermission(models.Model):
 
     MODULE_CHOICES = [
         ("inventory",          "Medicine Inventory"),
+        ("storage_locations",  "Storage Locations"),
         ("stock_management",   "Stock Management"),
         ("dispensing",         "Medicine Dispensing"),
         ("dispensing_card",    "Dispensing Card"),
@@ -56,6 +58,13 @@ class UserPermission(models.Model):
         ("reports",            "Reports & Analytics"),
         ("consumption_report", "Consumption Report"),
     ]
+
+    @classmethod
+    def module_keys(cls):
+        return [key for key, _label in cls.MODULE_CHOICES]
+
+    def as_dict(self):
+        return {key: bool(getattr(self, key)) for key in self.module_keys()}
 
     def __str__(self):
         return f"Permissions — {self.user.username}"
@@ -199,6 +208,56 @@ class MedicineCategory(models.Model):
         ordering = ['name']
 
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STORAGE AREA  (a room / floor-plan page, e.g. "Main Pharmacy")
+# ─────────────────────────────────────────────────────────────────────────────
+class StorageArea(models.Model):
+    name        = models.CharField(max_length=80, unique=True)
+    description = models.CharField(max_length=200, blank=True)
+    canvas_w    = models.PositiveIntegerField(default=860)   # aspect ratio only
+    canvas_h    = models.PositiveIntegerField(default=540)
+    sort_order  = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        ordering = ['sort_order', 'name']
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STORAGE LOCATION  (a shelf / cabinet / ref drawn on an area's floor plan)
+# x, y, w, h are percentages (0-100) of the area canvas.
+# ─────────────────────────────────────────────────────────────────────────────
+class StorageLocation(models.Model):
+    KIND_SHELF    = 'shelf'
+    KIND_LANDMARK = 'landmark'
+    KIND_CHOICES  = [
+        (KIND_SHELF,    'Storage (can hold medicines)'),
+        (KIND_LANDMARK, 'Landmark (door, railings, office…)'),
+    ]
+
+    area       = models.ForeignKey(StorageArea, on_delete=models.CASCADE, related_name='locations')
+    code       = models.CharField(max_length=30, unique=True, help_text='Short unique label, e.g. SR1-G2')
+    name       = models.CharField(max_length=80, blank=True)
+    kind       = models.CharField(max_length=10, choices=KIND_CHOICES, default=KIND_SHELF)
+    x          = models.FloatField(default=5)
+    y          = models.FloatField(default=5)
+    w          = models.FloatField(default=16)
+    h          = models.FloatField(default=12)
+    notes      = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.code} — {self.name}" if self.name and self.name != self.code else self.code
+
+    class Meta:
+        ordering = ['area__sort_order', 'code']
+
+
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MEDICINE  (product-level — one row per drug product)
 # batch_number / expiry_date / purchase_price moved to MedicineStock
@@ -237,6 +296,9 @@ class Medicine(models.Model):
     selling_price    = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     reorder_level    = models.PositiveIntegerField(default=10)
     storage_location = models.CharField(max_length=150, blank=True)
+    location         = models.ForeignKey(
+                           'StorageLocation', on_delete=models.SET_NULL,
+                           null=True, blank=True, related_name='medicines')
     is_s2_regulated  = models.BooleanField(default=False,
                            verbose_name='S2 Regulated',
                            help_text='Requires a valid S2 license from the prescribing doctor')
