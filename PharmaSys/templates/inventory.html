@@ -335,7 +335,15 @@ select.form-control{cursor:pointer}
                 </td>
                 <td style="color:#64748b;">
                     {{ m.category.name|default:"—" }}
-                    {% if m.location_id %}<div><a class="loc-chip" href="{% url 'storage_locations' %}?area={{ m.location.area_id }}&focus={{ m.location_id }}" title="Show on floor plan"><i class="fas fa-location-dot"></i> {{ m.location.code }}</a></div>{% endif %}
+                    {% if m.loc_list %}
+                    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:3px;">
+                        {% for it in m.loc_list %}
+                        <a class="loc-chip" style="margin-top:0" href="{% url 'storage_locations' %}?area={{ it.loc.area_id }}&focus={{ it.loc.pk }}" title="{{ it.loc.area.name }} — show on floor plan">
+                            <i class="fas fa-location-dot"></i> {{ it.loc.code }}{% if m.loc_list|length > 1 %} · {{ it.qty }}{% endif %}
+                        </a>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
                 </td>
                 <td style="color:#64748b;">{{ m.get_dosage_form_display }}</td>
                 <td style="color:#64748b;font-size:12px;">{{ m.supplier.name|default:"—" }}</td>
@@ -420,7 +428,7 @@ select.form-control{cursor:pointer}
                         <table class="batch-table">
                             <thead>
                                 <tr>
-                                    <th>Batch No.</th><th>Expiry Date</th><th>Qty</th>
+                                    <th>Batch No.</th><th>Expiry Date</th><th>Qty</th><th>Location</th>
                                     <th>Purchase Price</th><th>Supplier</th><th>Received</th><th>Status</th>
                                 </tr>
                             </thead>
@@ -439,6 +447,9 @@ select.form-control{cursor:pointer}
                                         {% else %}<span style="color:#b0bec5;">No expiry</span>{% endif %}
                                     </td>
                                     <td style="font-weight:700;color:{% if b.quantity == 0 %}#dc2626{% else %}#1a2433{% endif %};">{{ b.quantity }}</td>
+                                    <td style="font-size:11.5px;color:#64748b;">
+                                        {% if b.location %}{{ b.location.code }}{% elif m.location %}{{ m.location.code }}{% else %}—{% endif %}
+                                    </td>
                                     <td>₱{{ b.purchase_price }}</td>
                                     <td style="color:#64748b;font-size:11.5px;">
                                         {% if b.supplier %}{{ b.supplier.name }}{% elif m.supplier %}{{ m.supplier.name }}{% else %}—{% endif %}
@@ -452,7 +463,7 @@ select.form-control{cursor:pointer}
                                     </td>
                                 </tr>
                                 {% empty %}
-                                <tr><td colspan="7" style="text-align:center;color:#b0bec5;padding:12px;">No batches on record.</td></tr>
+                                <tr><td colspan="8" style="text-align:center;color:#b0bec5;padding:12px;">No batches on record.</td></tr>
                                 {% endfor %}
                             </tbody>
                         </table>

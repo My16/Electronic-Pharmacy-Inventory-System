@@ -85,6 +85,15 @@
         </a>
         {% endif %}
 
+        {% if perm.returns %}
+        <a href="{% url 'returns' %}"
+        class="nav-item {% block nav_returns %}{% endblock %}"
+        data-tooltip="Medicine Returns">
+            <i class="fas fa-rotate-left"></i>
+            <span class="nav-label">Medicine Returns</span>
+        </a>
+        {% endif %}
+
         {% if perm.dispensing_card %}
         <a href="{% url 'dispensing_card_list' %}"
            class="nav-item {% block nav_dispensing_card %}{% endblock %}"

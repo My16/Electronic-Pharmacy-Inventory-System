@@ -1,0 +1,253 @@
+{# consumption_average.html — included by consumption_report.html when active_tab == 'average' #}
+{% load static %}
+
+<style>
+@media screen { #printable-avg { display: none !important; } }
+@media print {
+    #printable-avg { display: block !important; }
+    #printable-avg .print-table.avg-wide { font-size: 7pt; }
+    #printable-avg .print-table.avg-wide th,
+    #printable-avg .print-table.avg-wide td { padding: 2px 3px; }
+    #printable-avg .print-table tbody td.avg-col { background: #f2f2f2; font-weight: 700; }
+}
+.cr-controls .hidden { display: none; }
+.cr-note { font-size: 12px; color: #64748b; margin: -8px 0 16px; }
+.cr-table tfoot td {
+    padding: 10px 14px; font-weight: 700; background: #f1f5f9; border-top: 2px solid #cbd5e1;
+}
+.cr-table td.avg-col { background: #eff6ff; font-weight: 700; color: #1d4ed8; }
+</style>
+
+<!-- ── Controls ───────────────────────────────────────────────────────────── -->
+<form method="get" id="avg-form">
+<input type="hidden" name="tab" value="average">
+<div class="cr-controls">
+
+    <label for="avg-period">Report Type</label>
+    <select name="period" id="avg-period">
+        {% for key, label in period_choices %}
+        <option value="{{ key }}" {% if key == period %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+    </select>
+
+    <label for="avg-month" class="js-monthly">Month</label>
+    <select name="month" id="avg-month" class="js-monthly">
+        {% for num, name in month_choices %}
+        <option value="{{ num }}" {% if num == selected_month %}selected{% endif %}>{{ name }}</option>
+        {% endfor %}
+    </select>
+
+    <label for="avg-quarter" class="js-quarterly">Quarter</label>
+    <select name="quarter" id="avg-quarter" class="js-quarterly">
+        {% for num, name in quarter_choices %}
+        <option value="{{ num }}" {% if num == selected_quarter %}selected{% endif %}>{{ name }}</option>
+        {% endfor %}
+    </select>
+
+    <label for="avg-year">Year</label>
+    <select name="year" id="avg-year">
+        {% for y in year_choices %}
+        <option value="{{ y }}" {% if y == selected_year %}selected{% endif %}>{{ y }}</option>
+        {% endfor %}
+    </select>
+
+    <button type="submit" class="btn-generate">
+        <i class="fas fa-magnifying-glass"></i> Generate
+    </button>
+
+    <div class="spacer"></div>
+
+    <button type="button" class="btn-print" onclick="window.print()">
+        <i class="fas fa-print"></i> Print
+    </button>
+</div>
+</form>
+
+<div class="cr-note">
+    {{ period_label }} &middot; averages based on <strong>{{ days_counted }}</strong> day(s)
+    ({{ months_counted|floatformat:2 }} month(s)){% if is_partial %} &mdash; period still in progress{% endif %}.
+    Consumed = dispensed + expired/damaged removals.
+</div>
+
+<!-- ── Summary Badges ─────────────────────────────────────────────────────── -->
+{% if rows %}
+<div class="cr-summary">
+    <div class="cr-badge">
+        <div class="cr-badge-label">Total Items</div>
+        <div class="cr-badge-value">{{ rows|length }}</div>
+    </div>
+    <div class="cr-badge red">
+        <div class="cr-badge-label">Total Consumed</div>
+        <div class="cr-badge-value">{{ total_consumed }}</div>
+    </div>
+    <div class="cr-badge blue">
+        <div class="cr-badge-label">Avg Consumed / Month</div>
+        <div class="cr-badge-value">{{ total_avg_month|floatformat:2 }}</div>
+    </div>
+    <div class="cr-badge green">
+        <div class="cr-badge-label">Avg Consumed / Day</div>
+        <div class="cr-badge-value">{{ total_avg_day|floatformat:2 }}</div>
+    </div>
+    <div class="cr-badge">
+        <div class="cr-badge-label">Total Stock on Hand (today)</div>
+        <div class="cr-badge-value">{{ total_stock }}</div>
+    </div>
+</div>
+{% endif %}
+
+<!-- ── Screen Table ───────────────────────────────────────────────────────── -->
+<div class="cr-table-wrap" style="overflow-x:auto;">
+{% if rows %}
+<table class="cr-table">
+    <thead>
+        <tr>
+            <th>#</th>
+            <th>Item Code</th>
+            <th>Description</th>
+            <th>Unit of Measure</th>
+            {% if show_breakdown %}{% for lbl in month_labels %}<th class="num">{{ lbl }}</th>{% endfor %}{% endif %}
+            <th class="num">Total Consumed</th>
+            <th class="num">Avg / Month</th>
+            <th class="num">Avg / Day</th>
+            <th class="num">Stock on Hand</th>
+            <th class="num">Months of Stock</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+        <tr>
+            <td style="color:#94a3b8;font-size:11px;">{{ forloop.counter }}</td>
+            <td class="item-code">{{ row.item_code }}</td>
+            <td class="desc">{{ row.description }}</td>
+            <td class="uom">{{ row.unit_of_measure }}</td>
+            {% if show_breakdown %}{% for v in row.months %}
+            <td class="num {% if v == 0 %}zero{% endif %}">{{ v }}</td>
+            {% endfor %}{% endif %}
+            <td class="num {% if row.total == 0 %}zero{% endif %}">{{ row.total }}</td>
+            <td class="num avg-col">{{ row.avg_month|floatformat:2 }}</td>
+            <td class="num avg-col">{{ row.avg_day|floatformat:2 }}</td>
+            <td class="num {% if row.stock == 0 %}zero{% endif %}">{{ row.stock }}</td>
+            <td class="num {% if row.months_left is not None and row.months_left < 1 %}negative{% endif %}">
+                {% if row.months_left is None %}—{% else %}{{ row.months_left }}{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr>
+            <td colspan="4" style="text-align:right;">TOTAL</td>
+            {% if show_breakdown %}{% for v in month_totals %}<td class="num">{{ v }}</td>{% endfor %}{% endif %}
+            <td class="num">{{ total_consumed }}</td>
+            <td class="num">{{ total_avg_month|floatformat:2 }}</td>
+            <td class="num">{{ total_avg_day|floatformat:2 }}</td>
+            <td class="num">{{ total_stock }}</td>
+            <td></td>
+        </tr>
+    </tfoot>
+</table>
+{% else %}
+<div class="cr-empty">
+    <i class="fas fa-file-circle-xmark"></i>
+    <p>No medicines found.</p>
+</div>
+{% endif %}
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     PRINTABLE SHEET (hidden on screen, rendered on print)
+═══════════════════════════════════════════════════════════════════════════ -->
+<div id="printable-avg">
+
+    <div class="print-header">
+        <div class="ph-form-no">MMS-FM-004/Rev.2/2Jan2025</div>
+        <div class="ph-header-row">
+            <div class="ph-logo-left">
+                <img src="{% static 'img/doh_logo.png' %}" alt="DOH Logo">
+            </div>
+            <div class="ph-header-center">
+                <div class="ph-republic">Republic of the Philippines</div>
+                <div class="ph-dept">Department of Health</div>
+                <div class="ph-hospital">Mayor Hilarion A. Ramiro Sr. Medical Center</div>
+                <div class="ph-city">Ozamiz City</div>
+                <div class="ph-title">{{ period_title }} Average Consumption Report &mdash; {{ period_label }}</div>
+                <div class="ph-unit">PHARMACY</div>
+            </div>
+            <div class="ph-logo-right">
+                <img src="{% static 'img/mharsmc.png' %}" alt="MHARSMC Logo">
+            </div>
+        </div>
+    </div>
+
+    <table class="print-table {% if show_breakdown %}avg-wide{% endif %}">
+        <thead>
+            <tr>
+                <th style="width:80px;">Item Code</th>
+                <th>Description</th>
+                <th style="width:60px;">Unit of Measure</th>
+                {% if show_breakdown %}{% for lbl in month_labels %}<th>{{ lbl }}</th>{% endfor %}{% endif %}
+                <th style="width:70px;">Total Consumed</th>
+                <th style="width:70px;">Avg / Month</th>
+                <th style="width:70px;">Avg / Day</th>
+                <th style="width:70px;">Stock on Hand</th>
+                <th style="width:70px;">Months of Stock</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td class="code">{{ row.item_code }}</td>
+                <td>{{ row.description }}</td>
+                <td style="text-align:center;text-transform:capitalize;">{{ row.unit_of_measure }}</td>
+                {% if show_breakdown %}{% for v in row.months %}
+                <td class="num">{% if v %}{{ v }}{% endif %}</td>
+                {% endfor %}{% endif %}
+                <td class="num">{% if row.total %}{{ row.total }}{% endif %}</td>
+                <td class="num avg-col">{% if row.total %}{{ row.avg_month|floatformat:2 }}{% endif %}</td>
+                <td class="num avg-col">{% if row.total %}{{ row.avg_day|floatformat:2 }}{% endif %}</td>
+                <td class="num">{% if row.stock %}{{ row.stock }}{% endif %}</td>
+                <td class="num">{% if row.months_left is not None %}{{ row.months_left }}{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="3" style="text-align:right;">TOTAL</td>
+                {% if show_breakdown %}{% for v in month_totals %}<td class="num">{{ v }}</td>{% endfor %}{% endif %}
+                <td class="num">{{ total_consumed }}</td>
+                <td class="num">{{ total_avg_month|floatformat:2 }}</td>
+                <td class="num">{{ total_avg_day|floatformat:2 }}</td>
+                <td class="num">{{ total_stock }}</td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+
+    <div class="print-signatures">
+        <div class="sig-block">
+            <div class="sig-label">Submitted by:</div>
+            <div class="sig-user">{{ submitted_by }}</div>
+            <div class="sig-title">{{ position }}</div>
+        </div>
+        <div class="sig-block">
+            <div class="sig-label">Noted by:</div>
+            <div class="sig-user">MARIA ROSELLA D. MANTUA</div>
+            <div class="sig-title">Pharmacist V</div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var period = document.getElementById('avg-period');
+    function toggle() {
+        document.querySelectorAll('.js-monthly').forEach(function (el) {
+            el.classList.toggle('hidden', period.value !== 'monthly');
+        });
+        document.querySelectorAll('.js-quarterly').forEach(function (el) {
+            el.classList.toggle('hidden', period.value !== 'quarterly');
+        });
+    }
+    period.addEventListener('change', toggle);
+    toggle();
+})();
+</script>

@@ -1,0 +1,1059 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}ePIS — Medicine Returns{% endblock %}
+{% block page_title %}Medicine Returns{% endblock %}
+{% block breadcrumb %}Returns{% endblock %}
+{% block nav_returns %}active{% endblock %}
+
+{% block extra_css %}
+<style>
+:root {
+  --navy:#0c1f3f; --navy-mid:#1a3460; --teal:#00ADB5; --teal-dim:#007f87;
+  --red:#b91c1c; --green:#15803d; --text:#1a1612;
+}
+@keyframes slideUp { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:none} }
+@keyframes spin    { to { transform: rotate(360deg); } }
+.spin { display:inline-block; animation: spin .8s linear infinite; }
+
+/* ── Tabs ─────────────────────────────────────────────────────────── */
+.rt-tabs {
+  display:flex; gap:6px; background:#fff; border:1px solid #eef2f7; border-radius:12px;
+  padding:5px; margin-bottom:18px; width:fit-content;
+  box-shadow:0 2px 10px rgba(0,0,0,.05);
+}
+.rt-tab {
+  display:flex; align-items:center; gap:8px; padding:9px 20px; border:none; border-radius:8px;
+  background:transparent; color:#64748b; font-size:13px; font-weight:600;
+  font-family:'Poppins',sans-serif; cursor:pointer; transition:background .2s,color .2s;
+}
+.rt-tab:hover { background:#f0f9fa; color:var(--teal-dim); }
+.rt-tab.active { background:var(--navy); color:#fff; }
+.rt-tab.active i { color:#7ae9ed; }
+.rt-pane { display:none; }
+.rt-pane.active { display:block; animation:slideUp .3s ease both; }
+
+/* ── Shared card bits ─────────────────────────────────────────────── */
+.card-box {
+  background:#fff; border-radius:14px; border:1px solid #eef2f7;
+  box-shadow:0 2px 14px rgba(0,0,0,.07);
+}
+.field-lbl { display:block; font-size:12px; font-weight:600; color:#475569; margin-bottom:6px; }
+.field-in, .field-sel, .field-ta {
+  width:100%; border:1px solid #e0e6ed; border-radius:9px; padding:9px 12px;
+  font-size:13px; font-family:'Poppins',sans-serif; color:var(--text);
+  background:#fff; outline:none; box-sizing:border-box; transition:border-color .2s, box-shadow .2s;
+}
+.field-in:focus, .field-sel:focus, .field-ta:focus {
+  border-color:var(--teal); box-shadow:0 0 0 3px rgba(0,173,181,.12);
+}
+.field-in[readonly] { background:#f8fafc; color:#78909c; }
+.field-ta { resize:vertical; min-height:80px; }
+.btn-primary {
+  display:inline-flex; align-items:center; justify-content:center; gap:7px; padding:10px 20px;
+  background:var(--teal); color:#fff; border:none; border-radius:9px; font-size:13px; font-weight:600;
+  font-family:'Poppins',sans-serif; cursor:pointer; transition:background .2s;
+}
+.btn-primary:hover { background:var(--teal-dim); }
+.btn-primary:disabled { opacity:.4; cursor:not-allowed; }
+.btn-navy { background:var(--navy); }
+.btn-navy:hover { background:var(--navy-mid); }
+.btn-ghost {
+  display:inline-flex; align-items:center; justify-content:center; gap:7px; padding:10px 20px;
+  background:#fff; color:#475569; border:1px solid #e0e6ed; border-radius:9px;
+  font-size:13px; font-weight:600; font-family:'Poppins',sans-serif; cursor:pointer;
+}
+.btn-ghost:hover { background:#f8fafc; }
+
+/* Quantity stepper */
+.qty-ctl { display:inline-flex; align-items:center; gap:5px; }
+.q-btn {
+  width:30px; height:30px; border-radius:7px; border:1px solid #e0e6ed; background:#f8fafc;
+  color:#475569; font-size:14px; font-weight:700; cursor:pointer; display:flex;
+  align-items:center; justify-content:center; font-family:'Poppins',sans-serif; transition:background .15s;
+}
+.q-btn:hover:not(:disabled) { background:#e6f9fa; border-color:var(--teal); color:var(--teal-dim); }
+.q-btn:disabled { opacity:.35; cursor:not-allowed; }
+.q-btn.ten { width:auto; padding:0 8px; font-size:11px; }
+.q-in {
+  width:54px; height:30px; text-align:center; border:1px solid #e0e6ed; border-radius:7px;
+  font-size:13px; font-weight:700; font-family:'Poppins',sans-serif; color:var(--text); outline:none;
+  -moz-appearance:textfield;
+}
+.q-in::-webkit-outer-spin-button, .q-in::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
+.q-in:focus { border-color:var(--teal); box-shadow:0 0 0 3px rgba(0,173,181,.12); }
+.q-in:disabled { background:#f1f5f9; color:#b0bec5; }
+
+/* ══ TAB 1 — Patient Return ═════════════════════════════════════════ */
+.pr-wrap { display:grid; grid-template-columns:340px 1fr; gap:20px; align-items:start; }
+
+.pr-side { overflow:hidden; position:sticky; top:80px; }
+.side-head { background:var(--navy); padding:18px 20px; display:flex; align-items:center; gap:10px; }
+.side-head-icon {
+  width:38px; height:38px; border-radius:10px; background:rgba(0,173,181,.25);
+  display:flex; align-items:center; justify-content:center; color:#7ae9ed; font-size:16px;
+}
+.side-head-title { font-size:13.5px; font-weight:700; color:#fff; }
+.side-head-sub   { font-size:11px; color:rgba(255,255,255,.5); margin-top:1px; }
+
+.pat-search-wrap { padding:14px 16px; border-bottom:1px solid #f0f4f8; background:#fafbfc; }
+.pat-search-box { position:relative; }
+.pat-search-box .s-icon {
+  position:absolute; left:11px; top:50%; transform:translateY(-50%);
+  color:#b0bec5; font-size:13px; pointer-events:none; z-index:1;
+}
+.pat-search-box input { padding-left:34px; }
+.dd {
+  display:none; position:absolute; top:calc(100% + 2px); left:0; right:0; z-index:600;
+  background:#fff; border:1px solid #c8dde0; border-radius:10px;
+  box-shadow:0 10px 30px rgba(0,0,0,.13); max-height:300px; overflow-y:auto;
+}
+.dd.open { display:block; }
+.dd-opt { padding:10px 14px; cursor:pointer; border-bottom:1px solid #f0f4f8; transition:background .15s; }
+.dd-opt:last-child { border-bottom:none; }
+.dd-opt:hover { background:#f0fdfe; }
+.dd-opt .hn   { font-size:10px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:var(--teal); }
+.dd-opt .nm   { font-size:13px; font-weight:600; color:var(--text); }
+.dd-opt .sub  { font-size:11px; color:#94a3b8; }
+.dd-msg { padding:16px 14px; text-align:center; font-size:12px; color:#94a3b8; }
+
+.pat-card {
+  display:none; margin:14px 16px; background:var(--navy); border-radius:11px; padding:14px;
+}
+.pat-card.show { display:block; animation:slideUp .25s ease; }
+.pat-card .hn    { font-size:10px; font-weight:700; letter-spacing:1.5px; color:rgba(0,173,181,.9); text-transform:uppercase; margin-bottom:4px; }
+.pat-card .nm    { font-size:15px; font-weight:700; color:#fff; line-height:1.3; }
+.pat-card .meta  { font-size:11px; color:rgba(255,255,255,.55); margin-top:4px; line-height:1.8; }
+.btn-change {
+  display:flex; align-items:center; justify-content:center; gap:6px; width:100%; margin-top:10px; padding:7px;
+  border:1px solid rgba(255,255,255,.15); border-radius:8px; background:transparent;
+  color:rgba(255,255,255,.6); font-size:12px; font-weight:500; font-family:'Poppins',sans-serif; cursor:pointer;
+}
+.btn-change:hover { background:rgba(255,255,255,.08); color:#fff; }
+
+.side-stats { display:none; padding:14px 16px; border-top:1px solid #f0f4f8; grid-template-columns:1fr 1fr; gap:10px; }
+.ss { background:#f8fafc; border:1px solid #eef2f7; border-radius:10px; padding:11px 12px; text-align:center; }
+.ss-v { font-size:20px; font-weight:800; color:var(--navy); line-height:1; }
+.ss-l { font-size:10.5px; color:#94a3b8; margin-top:3px; font-weight:500; }
+.side-empty { padding:32px 20px; text-align:center; color:#b0bec5; }
+.side-empty i { font-size:36px; margin-bottom:10px; display:block; color:#dde3ea; }
+.side-empty p { font-size:12.5px; line-height:1.6; }
+
+/* Main column */
+.pr-main { animation:slideUp .4s ease .1s both; }
+.pr-toolbar { padding:14px 20px; display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
+.pr-toolbar-title { font-size:14px; font-weight:700; color:var(--text); display:flex; align-items:center; gap:8px; flex:1; min-width:180px; }
+.pr-toolbar-title i { color:var(--teal); }
+.med-search { position:relative; width:300px; max-width:100%; }
+.med-search i { position:absolute; left:11px; top:50%; transform:translateY(-50%); color:#b0bec5; font-size:13px; pointer-events:none; }
+.med-search input { padding-left:34px; }
+.chk-lbl { display:flex; align-items:center; gap:6px; font-size:12px; color:#64748b; cursor:pointer; user-select:none; }
+
+.ret-table-wrap { overflow-x:auto; }
+.ret-table { width:100%; border-collapse:collapse; }
+.ret-table thead th {
+  background:#f8fafc; padding:10px 14px; text-align:left; font-size:10.5px; font-weight:700;
+  text-transform:uppercase; letter-spacing:.6px; color:#78909c; border-bottom:1px solid #eef2f7; white-space:nowrap;
+}
+.ret-table tbody td { padding:11px 14px; font-size:12.5px; border-bottom:1px solid #f4f7fb; vertical-align:middle; }
+.ret-table tbody tr:last-child td { border-bottom:none; }
+.ret-table tbody tr.is-done td { opacity:.5; }
+.ret-table tbody tr.has-qty td { background:#f0fdfe; }
+.m-name { font-weight:600; color:var(--text); }
+.m-gen  { font-size:11px; color:#94a3b8; margin-top:1px; }
+.txn-tag { font-size:11px; font-weight:700; color:var(--teal); letter-spacing:.5px; }
+.txn-dt  { font-size:11px; color:#94a3b8; }
+.s2-badge {
+  display:inline-flex; align-items:center; gap:3px; background:rgba(124,58,237,.1); color:#6d28d9;
+  border-radius:20px; padding:1px 7px; font-size:10px; font-weight:700; margin-left:4px;
+}
+.pill { display:inline-block; border-radius:20px; padding:2px 10px; font-size:11px; font-weight:700; }
+.pill.ok   { background:#dcfce7; color:var(--green); }
+.pill.none { background:#f1f5f9; color:#94a3b8; }
+.btn-all { border:none; background:none; color:var(--teal-dim); font-size:11px; font-weight:600; cursor:pointer; font-family:'Poppins',sans-serif; }
+.btn-all:hover { text-decoration:underline; }
+
+.pr-footer {
+  display:grid; grid-template-columns:240px 1fr auto; gap:14px; align-items:end;
+  padding:16px 20px; border-top:1px solid #eef2f7; background:#fafcfc; border-radius:0 0 14px 14px;
+}
+.pr-summary { font-size:12px; color:#64748b; text-align:right; line-height:1.6; }
+.pr-summary b { color:var(--navy); font-size:15px; }
+
+.empty-box { padding:60px 20px; text-align:center; }
+.empty-box i  { font-size:40px; color:#dde3ea; display:block; margin-bottom:12px; }
+.empty-box h3 { font-size:15px; font-weight:700; color:#78909c; margin-bottom:6px; }
+.empty-box p  { font-size:12.5px; color:#b0bec5; }
+
+/* ══ TAB 2 — Return Log ═════════════════════════════════════════════ */
+.rl-title { font-size:20px; font-weight:700; color:var(--navy); margin-bottom:16px; }
+.rl-grid { display:grid; grid-template-columns:minmax(280px,360px) 1fr; gap:20px; align-items:start; }
+.rl-left { padding:20px; display:flex; flex-direction:column; gap:16px; }
+.rl-right { padding:20px; }
+.rl-right-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+.rl-right-head h3 { font-size:14px; font-weight:700; color:var(--text); }
+
+.rl-table { --cols:1fr 250px 32px; }
+.rl-table.show-batch { --cols:1fr 210px 250px 32px; }
+.rl-head, .rl-row { display:grid; grid-template-columns:var(--cols); gap:12px; align-items:center; }
+.col-batch { display:none; }
+.show-batch .col-batch { display:block; }
+.rl-head {
+  background:var(--navy); color:#fff; padding:10px 14px; border-radius:10px 10px 0 0;
+  font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.6px;
+}
+.rl-head .col-qty { text-align:center; }
+.rl-body { border:1px solid #eef2f7; border-top:none; border-radius:0 0 10px 10px; }
+.rl-row { padding:10px 14px; border-bottom:1px solid #f4f7fb; }
+.rl-row:last-child { border-bottom:none; }
+.rl-row .qty-ctl { justify-content:center; }
+.rl-x {
+  width:30px; height:30px; border:none; background:none; color:#94a3b8; cursor:pointer;
+  border-radius:7px; font-size:14px; transition:background .15s,color .15s;
+}
+.rl-x:hover { background:#fee2e2; color:var(--red); }
+
+.ta { position:relative; }
+.ta input { padding-right:30px; }
+.ta .chev { position:absolute; right:11px; top:50%; transform:translateY(-50%); color:#94a3b8; font-size:11px; pointer-events:none; }
+.ta .dd-opt .nm { font-size:12.5px; }
+.ta.picked input { border-color:var(--teal); background:#f0fdfe; font-weight:600; }
+
+.rl-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:18px; flex-wrap:wrap; }
+.rl-foot-btns { display:flex; gap:10px; margin-left:auto; }
+
+/* Batch select */
+.b-sel {
+  width:100%; min-width:170px; border:1px solid #e0e6ed; border-radius:8px; padding:6px 8px;
+  font-size:11.5px; font-family:'Poppins',sans-serif; color:var(--text); background:#fff; outline:none;
+}
+.b-sel:focus { border-color:var(--teal); box-shadow:0 0 0 3px rgba(0,173,181,.12); }
+.b-sel:disabled { background:#f1f5f9; color:#b0bec5; }
+
+/* ══ TAB 3 — Report ═════════════════════════════════════════════════ */
+.rp-filters { padding:16px 20px; display:grid; grid-template-columns:repeat(5, minmax(120px,1fr)) auto; gap:12px; align-items:end; }
+.rp-cards { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin:16px 0; }
+.rp-card { padding:14px 18px; }
+.rp-card .v { font-size:22px; font-weight:800; color:var(--navy); line-height:1.1; }
+.rp-card .l { font-size:11px; color:#94a3b8; margin-top:3px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
+.rp-actions { display:flex; gap:8px; }
+.rp-note { padding:10px 20px; font-size:12px; color:#92400e; background:rgba(180,83,9,.08); display:none; }
+.tag { display:inline-block; border-radius:20px; padding:2px 9px; font-size:10.5px; font-weight:700; }
+.tag.yes { background:#dcfce7; color:var(--green); }
+.tag.no  { background:#f1f5f9; color:#78909c; }
+@media (max-width:1000px) { .rp-filters { grid-template-columns:1fr 1fr; } .rp-cards { grid-template-columns:1fr 1fr; } }
+
+/* Toast */
+.rt-toast {
+  position:fixed; right:24px; bottom:24px; z-index:9999; max-width:380px;
+  padding:12px 18px; border-radius:10px; font-size:13px; font-weight:500; color:#fff;
+  box-shadow:0 10px 30px rgba(0,0,0,.2); display:none;
+}
+.rt-toast.show { display:block; animation:slideUp .25s ease; }
+.rt-toast.ok  { background:var(--green); }
+.rt-toast.err { background:var(--red); }
+
+@media (max-width:1000px) {
+  .pr-wrap, .rl-grid { grid-template-columns:1fr; }
+  .pr-side { position:static; }
+  .pr-footer { grid-template-columns:1fr; }
+  .rl-table { --cols:1fr 220px 32px; }
+  .rl-table.show-batch { --cols:1fr 170px 220px 32px; }
+}
+</style>
+{% endblock %}
+
+
+{% block content %}
+{% csrf_token %}
+
+<!-- Tabs -->
+<div class="rt-tabs">
+  <button class="rt-tab active" data-tab="patient" onclick="switchTab('patient')">
+    <i class="fas fa-hospital-user"></i> Patient Return
+  </button>
+  <button class="rt-tab" data-tab="log" onclick="switchTab('log')">
+    <i class="fas fa-rotate-left"></i> Return Log
+  </button>
+  <button class="rt-tab" data-tab="report" onclick="switchTab('report')">
+    <i class="fas fa-file-lines"></i> Returns Report
+  </button>
+</div>
+
+<!-- ══════════════════ TAB 1 — PATIENT RETURN ══════════════════ -->
+<div class="rt-pane active" id="pane-patient">
+  <div class="pr-wrap">
+
+    <!-- Sidebar: patient lookup -->
+    <div class="card-box pr-side">
+      <div class="side-head">
+        <div class="side-head-icon"><i class="fas fa-user-injured"></i></div>
+        <div>
+          <div class="side-head-title">Patient Lookup</div>
+          <div class="side-head-sub">Search via iHOMIS+</div>
+        </div>
+      </div>
+
+      <div class="pat-search-wrap">
+        <div class="pat-search-box">
+          <i class="fas fa-magnifying-glass s-icon"></i>
+          <input type="text" id="patInput" class="field-in" autocomplete="off"
+                 placeholder="Hospital No., last name, first name…">
+          <div class="dd" id="patDD"></div>
+        </div>
+      </div>
+
+      <div class="pat-card" id="patCard">
+        <div class="hn"   id="pcHN"></div>
+        <div class="nm"   id="pcName"></div>
+        <div class="meta" id="pcMeta"></div>
+        <button class="btn-change" onclick="clearPatient()">
+          <i class="fas fa-arrows-rotate"></i> Change Patient
+        </button>
+      </div>
+
+      <div class="side-stats" id="sideStats">
+        <div class="ss"><div class="ss-v" id="stLines">0</div><div class="ss-l">Dispensed Lines</div></div>
+        <div class="ss"><div class="ss-v" id="stRet">0</div><div class="ss-l">Returnable Units</div></div>
+      </div>
+
+      <div class="side-empty" id="sideEmpty">
+        <i class="fas fa-hospital-user"></i>
+        <p>Search for a patient to list every medicine dispensed to them and choose what to return.</p>
+      </div>
+    </div>
+
+    <!-- Main: dispensed meds -->
+    <div class="pr-main">
+      <div class="card-box">
+        <div class="pr-toolbar">
+          <div class="pr-toolbar-title">
+            <i class="fas fa-pills"></i>
+            <span id="prTitle">Dispensed Medicines</span>
+          </div>
+          <label class="chk-lbl">
+            <input type="checkbox" id="hideDone" checked onchange="renderItems()">
+            Hide fully returned
+          </label>
+          <div class="med-search">
+            <i class="fas fa-magnifying-glass"></i>
+            <input type="text" id="medFilter" class="field-in" placeholder="Search medicine, Txn #, Rx…"
+                   oninput="renderItems()" disabled>
+          </div>
+        </div>
+
+        <div id="prLoading" class="empty-box" style="display:none;">
+          <i class="fas fa-circle-notch spin" style="color:var(--teal);"></i>
+          <p>Loading dispensed medicines…</p>
+        </div>
+
+        <div class="ret-table-wrap" id="prTableWrap" style="display:none;">
+          <table class="ret-table">
+            <thead>
+              <tr>
+                <th>Medicine</th>
+                <th>Transaction</th>
+                <th style="text-align:center;">Dispensed</th>
+                <th style="text-align:center;">Returned</th>
+                <th style="text-align:center;">Returnable</th>
+                <th style="text-align:center;">Return Qty</th>
+              </tr>
+            </thead>
+            <tbody id="prBody"></tbody>
+          </table>
+        </div>
+
+        <div class="empty-box" id="prEmpty">
+          <i class="fas fa-id-card-clip"></i>
+          <h3>Select a Patient</h3>
+          <p>Search for a patient on the left to see what was dispensed to them.</p>
+        </div>
+
+        <div class="pr-footer" id="prFooter" style="display:none;">
+          <div>
+            <label class="field-lbl">Reason for Return</label>
+            <select id="prReason" class="field-sel" onchange="updateSummary()">
+              <option value="">Select reason</option>
+              {% for val, label in reasons %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="field-lbl">Notes</label>
+            <input type="text" id="prNotes" class="field-in" placeholder="Optional notes…">
+          </div>
+          <div style="display:flex;align-items:center;gap:14px;">
+            <div class="pr-summary"><b id="sumUnits">0</b> unit(s)<br><span id="sumLines">0 medicine(s)</span></div>
+            <button class="btn-primary btn-navy" id="prSubmit" onclick="submitPatientReturn()" disabled>
+              <i class="fas fa-rotate-left"></i> Process Return
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+
+<!-- ══════════════════ TAB 2 — RETURN LOG ══════════════════ -->
+<div class="rt-pane" id="pane-log">
+  <div class="rl-title">Log Returned Medicines</div>
+
+  <div class="rl-grid">
+
+    <!-- Left: details -->
+    <div class="card-box rl-left">
+      <div>
+        <label class="field-lbl">Date of Return</label>
+        <input type="text" class="field-in" readonly value="{{ now|date:'M j, Y, g:i A' }}">
+      </div>
+      <div>
+        <label class="field-lbl">Patient Name</label>
+        <input type="text" id="rlPatient" class="field-in" placeholder="e.g. Juan dela Cruz">
+      </div>
+      <div>
+        <label class="field-lbl">Reason for Return</label>
+        <select id="rlReason" class="field-sel">
+          <option value="">Select reason</option>
+          {% for val, label in reasons %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="field-lbl">Notes</label>
+        <textarea id="rlNotes" class="field-ta" placeholder="Optional notes…"></textarea>
+      </div>
+      <label class="chk-lbl" style="align-items:flex-start;">
+        <input type="checkbox" id="rlRestock" style="margin-top:3px;" onchange="toggleBatchCol()">
+        <span>Add returned quantities back to stock<br>
+          <small style="color:#94a3b8;">Off = record only. On = pick the batch each line returns into
+            (or leave it on “New batch” to add a batch with no expiry).</small></span>
+      </label>
+    </div>
+
+    <!-- Right: medicine lines -->
+    <div>
+      <div class="card-box rl-right rl-table" id="rlTable">
+        <div class="rl-right-head">
+          <h3>Medicine Lines</h3>
+          <button class="btn-primary btn-navy" onclick="addLine()"><i class="fas fa-plus"></i> Add Line</button>
+        </div>
+        <div class="rl-head">
+          <span>Medicine Name</span>
+          <span class="col-batch">Return To Batch</span>
+          <span class="col-qty">Quantity</span>
+          <span></span>
+        </div>
+        <div class="rl-body" id="rlBody"></div>
+      </div>
+
+      <div class="rl-foot">
+        <span style="font-size:12px;color:#64748b;" id="rlSummary"></span>
+        <div class="rl-foot-btns">
+          <button class="btn-ghost" onclick="resetLog()">Cancel</button>
+          <button class="btn-primary btn-navy" id="rlSubmit" onclick="submitLog()">
+            <i class="fas fa-check"></i> Submit Return Log
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════ TAB 3 — RETURNS REPORT ══════════════════ -->
+<div class="rt-pane" id="pane-report">
+  <div class="card-box">
+    <div class="rp-filters">
+      <div>
+        <label class="field-lbl">From</label>
+        <input type="date" id="rpFrom" class="field-in" value="{{ now|date:'Y-m-01' }}">
+      </div>
+      <div>
+        <label class="field-lbl">To</label>
+        <input type="date" id="rpTo" class="field-in" value="{{ now|date:'Y-m-d' }}">
+      </div>
+      <div>
+        <label class="field-lbl">Reason</label>
+        <select id="rpReason" class="field-sel">
+          <option value="">All reasons</option>
+          {% for val, label in reasons %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="field-lbl">Source</label>
+        <select id="rpSource" class="field-sel">
+          <option value="">All sources</option>
+          {% for val, label in sources %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="field-lbl">Search</label>
+        <input type="text" id="rpQ" class="field-in" placeholder="Patient, HN, medicine, batch…">
+      </div>
+      <div class="rp-actions">
+        <button class="btn-primary" onclick="loadReport()"><i class="fas fa-filter"></i> Apply</button>
+        <button class="btn-ghost" onclick="printReport()" title="Print"><i class="fas fa-print"></i></button>
+        <button class="btn-ghost" onclick="exportReportCsv()" title="Export CSV"><i class="fas fa-file-csv"></i></button>
+      </div>
+    </div>
+    <div class="rp-note" id="rpNote">Showing the first 3,000 lines only. Narrow the date range to see everything.</div>
+  </div>
+
+  <div class="rp-cards">
+    <div class="card-box rp-card"><div class="v" id="rpReturns">0</div><div class="l">Returns</div></div>
+    <div class="card-box rp-card"><div class="v" id="rpLines">0</div><div class="l">Medicine Lines</div></div>
+    <div class="card-box rp-card"><div class="v" id="rpUnits">0</div><div class="l">Units Returned</div></div>
+    <div class="card-box rp-card"><div class="v" id="rpRestocked">0</div><div class="l">Units Restocked</div></div>
+  </div>
+
+  <div class="card-box">
+    <div class="ret-table-wrap">
+      <table class="ret-table">
+        <thead>
+          <tr>
+            <th>Date</th><th>Ret #</th><th>Source</th><th>Patient</th><th>Medicine</th>
+            <th>Batch</th><th>Expiry</th><th style="text-align:center;">Qty</th>
+            <th>Reason</th><th>Restocked</th><th>Processed By</th><th>Notes</th>
+          </tr>
+        </thead>
+        <tbody id="rpBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="rt-toast" id="rtToast"></div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script>
+const MED_BATCHES_TMPL = "{% url 'return_medicine_batches' pk=0 %}";
+const PATIENT_SEARCH_URL = "{% url 'patient_search_ajax' %}";
+const MED_SEARCH_URL     = "{% url 'medicine_search_ajax' %}";
+const ITEMS_URL_TMPL     = "{% url 'return_patient_items' hpatkey='__K__' %}";
+const PATIENT_SUBMIT_URL = "{% url 'return_patient_submit' %}";
+const LOG_SUBMIT_URL     = "{% url 'return_log_submit' %}";
+const REPORT_URL = "{% url 'returns_report_data' %}";
+
+// ── helpers ──────────────────────────────────────────────────────────────
+function escHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                  .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function csrf() {
+  const el = document.querySelector('[name=csrfmiddlewaretoken]');
+  return el ? el.value : '';
+}
+function postJSON(url, body) {
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf(), 'X-Requested-With': 'XMLHttpRequest' },
+    body: JSON.stringify(body)
+  }).then(r => r.json().then(j => ({ ok: r.ok, data: j })));
+}
+let toastTimer;
+function toast(msg, ok) {
+  const t = document.getElementById('rtToast');
+  t.textContent = msg;
+  t.className = 'rt-toast show ' + (ok ? 'ok' : 'err');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 4500);
+}
+function clampInt(v, min, max) {
+  v = parseInt(v, 10);
+  if (isNaN(v)) v = min;
+  return Math.min(Math.max(v, min), max);
+}
+function debounce(fn, ms) {
+  let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+// ── tabs ─────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.rt-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.rt-pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + name));
+  try { history.replaceState(null, '', '#' + name); } catch (e) {}
+  if (name === 'report') loadReport();
+}
+if (location.hash === '#log')    switchTab('log');
+if (location.hash === '#report') switchTab('report');
+
+
+/* ════════════════════════════════════════════════════════════════════════
+   TAB 1 — PATIENT RETURN
+   ════════════════════════════════════════════════════════════════════════ */
+let patient = null;
+let rows    = [];     // all dispensed lines for the patient
+let qtyMap  = {};     // item_pk -> qty to return
+
+// ── patient search ───────────────────────────────────────────────────────
+const patInput = document.getElementById('patInput');
+const patDD    = document.getElementById('patDD');
+
+patInput.addEventListener('input', debounce(function () {
+  const q = patInput.value.trim();
+  if (patient || q.length < 2) { patDD.classList.remove('open'); return; }
+  patDD.innerHTML = '<div class="dd-msg"><i class="fas fa-circle-notch spin" style="color:var(--teal);"></i> Searching…</div>';
+  patDD.classList.add('open');
+  fetch(PATIENT_SEARCH_URL + '?q=' + encodeURIComponent(q))
+    .then(r => r.json())
+    .then(d => renderPatDD(d.results || [], d.error))
+    .catch(() => { patDD.innerHTML = '<div class="dd-msg">Network error — could not reach iHOMIS+.</div>'; });
+}, 320));
+
+function renderPatDD(list, error) {
+  if (error)        { patDD.innerHTML = `<div class="dd-msg">iHOMIS+ unavailable: ${escHtml(error)}</div>`; return; }
+  if (!list.length) { patDD.innerHTML = '<div class="dd-msg">No patients found.</div>'; return; }
+  patDD.innerHTML = list.map((p, i) => `
+    <div class="dd-opt" data-i="${i}">
+      <div class="hn">${escHtml(p.hospital_number)}</div>
+      <div class="nm">${escHtml(p.full_name_formal)}</div>
+      <div class="sub">${escHtml(p.birthdate || '—')} · ${escHtml(p.sex || '—')}</div>
+    </div>`).join('');
+  patDD.querySelectorAll('.dd-opt').forEach(el =>
+    el.addEventListener('click', () => selectPatient(list[+el.dataset.i])));
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.pat-search-box')) patDD.classList.remove('open');
+});
+
+function selectPatient(p) {
+  patient = p;
+  patDD.classList.remove('open');
+  patInput.value = '';
+  document.getElementById('pcHN').textContent   = p.hospital_number || '—';
+  document.getElementById('pcName').textContent = p.full_name_formal || p.full_name || '—';
+  document.getElementById('pcMeta').innerHTML =
+    escHtml(p.birthdate || '—') + ' · ' + escHtml(p.sex || '—') + '<br>' + escHtml(p.address || '');
+  document.getElementById('patCard').classList.add('show');
+  document.getElementById('sideEmpty').style.display = 'none';
+  document.getElementById('prTitle').textContent = 'Dispensed Medicines — ' + (p.full_name || '');
+  loadItems();
+}
+
+function clearPatient() {
+  patient = null; rows = []; qtyMap = {};
+  document.getElementById('patCard').classList.remove('show');
+  document.getElementById('sideStats').style.display = 'none';
+  document.getElementById('sideEmpty').style.display = 'block';
+  document.getElementById('prTitle').textContent = 'Dispensed Medicines';
+  document.getElementById('prTableWrap').style.display = 'none';
+  document.getElementById('prFooter').style.display = 'none';
+  document.getElementById('prEmpty').style.display = '';
+  document.getElementById('prEmpty').innerHTML =
+    '<i class="fas fa-id-card-clip"></i><h3>Select a Patient</h3><p>Search for a patient on the left to see what was dispensed to them.</p>';
+  const mf = document.getElementById('medFilter'); mf.value = ''; mf.disabled = true;
+  document.getElementById('prReason').value = '';
+  document.getElementById('prNotes').value = '';
+}
+
+// ── load + render dispensed lines ────────────────────────────────────────
+function loadItems() {
+  const loading = document.getElementById('prLoading');
+  document.getElementById('prEmpty').style.display = 'none';
+  document.getElementById('prTableWrap').style.display = 'none';
+  document.getElementById('prFooter').style.display = 'none';
+  loading.style.display = '';
+  qtyMap = {};
+
+  fetch(ITEMS_URL_TMPL.replace('__K__', encodeURIComponent(patient.hpatkey)),
+        { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(d => {
+      loading.style.display = 'none';
+      rows = d.items || [];
+      const returnable = rows.reduce((s, r) => s + r.returnable, 0);
+      document.getElementById('stLines').textContent = rows.length;
+      document.getElementById('stRet').textContent   = returnable;
+      document.getElementById('sideStats').style.display = 'grid';
+
+      if (!rows.length) {
+        const e = document.getElementById('prEmpty');
+        e.style.display = '';
+        e.innerHTML = '<i class="fas fa-pills"></i><h3>No Dispensing Records</h3><p>Nothing has been dispensed to this patient yet.</p>';
+        return;
+      }
+      document.getElementById('medFilter').disabled = false;
+      document.getElementById('prTableWrap').style.display = '';
+      document.getElementById('prFooter').style.display = 'grid';
+      renderItems();
+    })
+    .catch(err => {
+      loading.style.display = 'none';
+      const e = document.getElementById('prEmpty');
+      e.style.display = '';
+      e.innerHTML = `<i class="fas fa-wifi" style="color:#f59e0b;"></i><h3>Could not load</h3><p>${escHtml(err.message)}</p>`;
+    });
+}
+
+function renderItems() {
+  const q        = document.getElementById('medFilter').value.trim().toLowerCase();
+  const hideDone = document.getElementById('hideDone').checked;
+  const body     = document.getElementById('prBody');
+
+  const list = rows.filter(r => {
+    if (hideDone && r.returnable === 0) return false;
+    if (!q) return true;
+    return (r.name + ' ' + r.generic + ' ' + r.strength + ' txn ' + r.txn_pk + ' ' + r.prescription_no)
+             .toLowerCase().includes(q);
+  });
+
+  if (!list.length) {
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-box" style="padding:36px;">
+      <i class="fas fa-magnifying-glass"></i><h3>No medicines found</h3>
+      <p>Try a different search${hideDone ? ' or untick “Hide fully returned”' : ''}.</p></div></td></tr>`;
+    updateSummary();
+    return;
+  }
+
+  body.innerHTML = list.map(r => {
+    const done = r.returnable === 0;
+    const qty  = qtyMap[r.item_pk] || 0;
+    return `
+    <tr class="${done ? 'is-done' : ''} ${qty > 0 ? 'has-qty' : ''}" data-pk="${r.item_pk}">
+      <td>
+        <div class="m-name">${escHtml(r.name)} ${escHtml(r.strength)}
+          ${r.is_s2 ? '<span class="s2-badge"><i class="fas fa-shield-halved" style="font-size:8px;"></i> S2</span>' : ''}</div>
+        <div class="m-gen">${escHtml(r.generic)} · ${escHtml(r.form)}</div>
+      </td>
+      <td>
+        <div class="txn-tag">Txn #${String(r.txn_pk).padStart(5, '0')}</div>
+        <div class="txn-dt">${escHtml(r.date)}${r.prescription_no ? ' · Rx ' + escHtml(r.prescription_no) : ''}</div>
+      </td>
+      <td style="text-align:center;font-weight:700;">${r.dispensed}</td>
+      <td style="text-align:center;">${r.returned || '—'}</td>
+      <td style="text-align:center;">
+        <span class="pill ${done ? 'none' : 'ok'}">${r.returnable}</span>
+      </td>
+      <td style="text-align:center;">
+        <div class="qty-ctl">
+          <button class="q-btn" data-d="-1" ${done ? 'disabled' : ''}>−</button>
+          <input type="number" class="q-in" min="0" max="${r.returnable}" value="${qty}" ${done ? 'disabled' : ''}>
+          <button class="q-btn" data-d="1"  ${done ? 'disabled' : ''}>+</button>
+          <button class="q-btn ten" data-d="10" ${done ? 'disabled' : ''}>+10</button>
+        </div>
+        ${done ? '' : `<button class="btn-all" data-all="1">Return all</button>`}
+      </td>
+    </tr>`;
+  }).join('');
+  updateSummary();
+}
+
+// delegated events for qty controls (so typing never loses focus)
+document.getElementById('prBody').addEventListener('click', function (e) {
+  const tr = e.target.closest('tr[data-pk]'); if (!tr) return;
+  const pk = +tr.dataset.pk, r = rows.find(x => x.item_pk === pk);
+  const btn = e.target.closest('.q-btn');
+  if (btn)                      setQty(tr, r, (qtyMap[pk] || 0) + parseInt(btn.dataset.d, 10));
+  else if (e.target.dataset.all) setQty(tr, r, r.returnable);
+});
+document.getElementById('prBody').addEventListener('input', function (e) {
+  if (!e.target.classList.contains('q-in')) return;
+  const tr = e.target.closest('tr[data-pk]');
+  const r  = rows.find(x => x.item_pk === +tr.dataset.pk);
+  const raw = e.target.value;
+  if (raw === '') { setQty(tr, r, 0, true); return; }
+  setQty(tr, r, raw, document.activeElement === e.target && +raw <= r.returnable);
+});
+
+function setQty(tr, r, val, keepInput) {
+  const v = clampInt(val, 0, r.returnable);
+  qtyMap[r.item_pk] = v;
+  if (!keepInput) tr.querySelector('.q-in').value = v;
+  tr.classList.toggle('has-qty', v > 0);
+  updateSummary();
+}
+
+function updateSummary() {
+  let units = 0, lines = 0;
+  Object.values(qtyMap).forEach(v => { if (v > 0) { units += v; lines++; } });
+  document.getElementById('sumUnits').textContent = units;
+  document.getElementById('sumLines').textContent = lines + ' medicine' + (lines !== 1 ? 's' : '');
+  document.getElementById('prSubmit').disabled =
+    !(units > 0 && document.getElementById('prReason').value);
+}
+
+function submitPatientReturn() {
+  const items = Object.entries(qtyMap).filter(([, v]) => v > 0)
+                    .map(([k, v]) => ({ item_pk: +k, quantity: v }));
+  if (!items.length) return;
+  const btn = document.getElementById('prSubmit');
+  btn.disabled = true;
+  postJSON(PATIENT_SUBMIT_URL, {
+    ihomis_hpatkey:  patient.hpatkey,
+    ihomis_hpercode: patient.hospital_number,
+    patient_name:    patient.full_name,
+    reason: document.getElementById('prReason').value,
+    notes:  document.getElementById('prNotes').value,
+    items
+  }).then(({ ok, data }) => {
+    if (!ok || data.error) { toast(data.error || 'Could not process return.', false); updateSummary(); return; }
+    toast(data.message, true);
+    document.getElementById('prReason').value = '';
+    document.getElementById('prNotes').value = '';
+    loadItems();                       // refresh returned / returnable counts
+  }).catch(() => { toast('Network error.', false); updateSummary(); });
+}
+
+
+/* ════════════════════════════════════════════════════════════════════════
+   TAB 2 — RETURN LOG
+   ════════════════════════════════════════════════════════════════════════ */
+const rlBody = document.getElementById('rlBody');
+
+function batchLabel(b) {
+  return `${b.batch_number} · ${b.expiry}${b.expired ? ' (expired)' : ''} · Qty ${b.quantity}` +
+         (b.location ? ' · ' + b.location : '');
+}
+
+function toggleBatchCol() {
+  document.getElementById('rlTable')
+          .classList.toggle('show-batch', document.getElementById('rlRestock').checked);
+}
+
+function resetLineBatch(row) {
+  const sel = row.querySelector('.b-sel');
+  sel.innerHTML = '<option value="">Pick a medicine first</option>';
+  sel.disabled = true;
+}
+
+function loadLineBatches(row, medPk) {
+  const sel = row.querySelector('.b-sel');
+  sel.disabled = true;
+  sel.innerHTML = '<option value="">Loading…</option>';
+  fetch(MED_BATCHES_TMPL.replace('/0/', '/' + medPk + '/'),
+        { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(r => r.json())
+    .then(d => {
+      sel.innerHTML = '<option value="">New batch (no expiry)</option>' +
+        (d.batches || []).map(b =>
+          `<option value="${b.pk}">${escHtml(batchLabel(b))}</option>`).join('');
+      sel.disabled = false;
+    })
+    .catch(() => {
+      sel.innerHTML = '<option value="">New batch (no expiry)</option>';
+      sel.disabled = false;
+    });
+}
+
+function addLine() {
+  const row = document.createElement('div');
+  row.className = 'rl-row';
+  row.innerHTML = `
+    <div class="ta">
+      <input type="text" class="field-in ta-in" placeholder="Search or type medicine…" autocomplete="off">
+      <i class="fas fa-chevron-down chev"></i>
+      <div class="dd"></div>
+    </div>
+    <div class="col-batch">
+      <select class="b-sel" disabled><option value="">Pick a medicine first</option></select>
+    </div>
+    <div class="qty-ctl">
+      <button type="button" class="q-btn" data-d="-1">−</button>
+      <input type="number" class="q-in" min="1" value="1">
+      <button type="button" class="q-btn" data-d="1">+</button>
+      <button type="button" class="q-btn ten" data-d="10">+10</button>
+    </div>
+    <button type="button" class="rl-x" title="Remove line"><i class="fas fa-xmark"></i></button>`;
+  rlBody.appendChild(row);
+
+  const ta = row.querySelector('.ta'), input = row.querySelector('.ta-in'), dd = row.querySelector('.dd');
+  const qin = row.querySelector('.q-in');
+  row.dataset.pk = '';
+
+  const search = debounce(function () {
+    const q = input.value.trim();
+    if (!q) { dd.classList.remove('open'); return; }
+    fetch(MED_SEARCH_URL + '?q=' + encodeURIComponent(q), { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      .then(r => r.json())
+      .then(d => {
+        const list = d.results || [];
+        if (!list.length) { dd.innerHTML = '<div class="dd-msg">No medicines found.</div>'; }
+        else {
+          dd.innerHTML = list.map((m, i) => `
+            <div class="dd-opt" data-i="${i}">
+              <div class="nm">${escHtml(m.label)}</div>
+              <div class="sub">${escHtml(m.generic_name || '')} · Stock: ${m.stock_quantity}</div>
+            </div>`).join('');
+          dd.querySelectorAll('.dd-opt').forEach(el => el.addEventListener('mousedown', ev => {
+            ev.preventDefault();
+            const m = list[+el.dataset.i];
+            row.dataset.pk = m.pk;
+            input.value = m.label;
+            ta.classList.add('picked');
+            loadLineBatches(row, m.pk);
+            dd.classList.remove('open');
+          }));
+        }
+        dd.classList.add('open');
+      }).catch(() => {});
+  }, 250);
+
+  input.addEventListener('input', () => {
+    row.dataset.pk = ''; ta.classList.remove('picked'); resetLineBatch(row); search();
+  });
+  input.addEventListener('focus', () => { if (input.value.trim() && !row.dataset.pk) search(); });
+  input.addEventListener('blur',  () => setTimeout(() => dd.classList.remove('open'), 150));
+
+  row.querySelectorAll('.q-btn').forEach(b => b.addEventListener('click', () =>
+    { qin.value = clampInt((parseInt(qin.value, 10) || 0) + parseInt(b.dataset.d, 10), 1, 100000); }));
+  qin.addEventListener('blur', () => { qin.value = clampInt(qin.value, 1, 100000); });
+  row.querySelector('.rl-x').addEventListener('click', () => {
+    row.remove();
+    if (!rlBody.children.length) addLine();
+  });
+}
+
+function resetLog() {
+  rlBody.innerHTML = '';
+  for (let i = 0; i < 5; i++) addLine();
+  ['rlPatient', 'rlNotes'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('rlReason').value = '';
+  document.getElementById('rlRestock').checked = false;
+  toggleBatchCol();
+}
+
+function submitLog() {
+  const items = [];
+  let bad = null;
+  const restock = document.getElementById('rlRestock').checked;
+  rlBody.querySelectorAll('.rl-row').forEach(row => {
+    const text = row.querySelector('.ta-in').value.trim();
+    const pk   = row.dataset.pk;
+    const qty  = clampInt(row.querySelector('.q-in').value, 1, 100000);
+    const bsel = row.querySelector('.b-sel');
+    if (pk)        items.push({ medicine_pk: +pk, quantity: qty,
+                                batch_id: (restock && bsel && !bsel.disabled) ? bsel.value : '' });
+    else if (text) bad = text;
+  });
+  if (bad)          { toast(`Pick “${bad}” from the dropdown list.`, false); return; }
+  if (!items.length){ toast('Add at least one medicine.', false); return; }
+  const reason = document.getElementById('rlReason').value;
+  if (!reason)      { toast('Please select a reason for return.', false); return; }
+
+  const btn = document.getElementById('rlSubmit');
+  btn.disabled = true;
+  postJSON(LOG_SUBMIT_URL, {
+    patient_name: document.getElementById('rlPatient').value,
+    reason,
+    notes:   document.getElementById('rlNotes').value,
+    restock: document.getElementById('rlRestock').checked,
+    items
+  }).then(({ ok, data }) => {
+    btn.disabled = false;
+    if (!ok || data.error) { toast(data.error || 'Could not save log.', false); return; }
+    toast(data.message, true);
+    resetLog();
+  }).catch(() => { btn.disabled = false; toast('Network error.', false); });
+}
+
+
+/* ════════════════════════════════════════════════════════════════════════
+   TAB 3 — RETURNS REPORT
+   ════════════════════════════════════════════════════════════════════════ */
+let reportRows = [];
+
+function loadReport() {
+  const params = new URLSearchParams({
+    date_from: document.getElementById('rpFrom').value,
+    date_to:   document.getElementById('rpTo').value,
+    reason:    document.getElementById('rpReason').value,
+    source:    document.getElementById('rpSource').value,
+    q:         document.getElementById('rpQ').value.trim(),
+  });
+  const body = document.getElementById('rpBody');
+  body.innerHTML = '<tr><td colspan="12"><div class="empty-box" style="padding:36px;">' +
+    '<i class="fas fa-circle-notch spin" style="color:var(--teal);"></i><p>Loading…</p></div></td></tr>';
+
+  fetch(REPORT_URL + '?' + params.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(d => {
+      reportRows = d.rows || [];
+      document.getElementById('rpReturns').textContent   = d.totals.returns;
+      document.getElementById('rpLines').textContent     = d.totals.lines;
+      document.getElementById('rpUnits').textContent     = d.totals.units;
+      document.getElementById('rpRestocked').textContent = d.totals.restocked_units;
+      document.getElementById('rpNote').style.display    = d.truncated ? 'block' : 'none';
+      renderReport();
+    })
+    .catch(err => {
+      body.innerHTML = `<tr><td colspan="12"><div class="empty-box" style="padding:36px;">
+        <i class="fas fa-wifi" style="color:#f59e0b;"></i><h3>Could not load report</h3>
+        <p>${escHtml(err.message)}</p></div></td></tr>`;
+    });
+}
+
+function renderReport() {
+  const body = document.getElementById('rpBody');
+  if (!reportRows.length) {
+    body.innerHTML = `<tr><td colspan="12"><div class="empty-box" style="padding:36px;">
+      <i class="fas fa-rotate-left"></i><h3>No returns found</h3>
+      <p>Try a wider date range or clear the filters.</p></div></td></tr>`;
+    return;
+  }
+  body.innerHTML = reportRows.map(r => `
+    <tr>
+      <td><div>${escHtml(r.date)}</div><div class="txn-dt">${escHtml(r.time)}</div></td>
+      <td><span class="txn-tag">#${String(r.return_pk).padStart(5, '0')}</span></td>
+      <td>${escHtml(r.source)}</td>
+      <td><div class="m-name">${escHtml(r.patient_name)}</div>
+          ${r.hn ? `<div class="m-gen">HN ${escHtml(r.hn)}</div>` : ''}</td>
+      <td><div class="m-name">${escHtml(r.medicine)} ${escHtml(r.strength)}</div>
+          <div class="m-gen">${escHtml(r.generic)} · ${escHtml(r.form)}</div></td>
+      <td>${escHtml(r.batch_number)}</td>
+      <td>${escHtml(r.expiry)}</td>
+      <td style="text-align:center;font-weight:700;">${r.quantity}</td>
+      <td>${escHtml(r.reason)}</td>
+      <td><span class="tag ${r.restocked ? 'yes' : 'no'}">${r.restocked ? 'Yes' : 'No'}</span></td>
+      <td>${escHtml(r.by)}</td>
+      <td style="max-width:200px;">${escHtml(r.notes)}</td>
+    </tr>`).join('');
+}
+
+function exportReportCsv() {
+  if (!reportRows.length) { toast('Nothing to export.', false); return; }
+  const head = ['Date','Time','Return #','Source','Patient','HN','Medicine','Strength','Form',
+                'Batch','Expiry','Qty','Reason','Restocked','Processed By','Notes'];
+  const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+  const lines = [head.map(q).join(',')].concat(reportRows.map(r => [
+    r.date, r.time, r.return_pk, r.source, r.patient_name, r.hn, r.medicine, r.strength, r.form,
+    r.batch_number, r.expiry, r.quantity, r.reason, r.restocked ? 'Yes' : 'No', r.by, r.notes
+  ].map(q).join(',')));
+  const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `returns_${document.getElementById('rpFrom').value}_to_${document.getElementById('rpTo').value}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function printReport() {
+  if (!reportRows.length) { toast('Nothing to print.', false); return; }
+  const rowsHtml = reportRows.map(r => `<tr>
+    <td>${escHtml(r.date)}</td><td>#${r.return_pk}</td><td>${escHtml(r.patient_name)}</td>
+    <td>${escHtml(r.medicine)} ${escHtml(r.strength)}</td><td>${escHtml(r.batch_number)}</td>
+    <td>${escHtml(r.expiry)}</td><td style="text-align:center">${r.quantity}</td>
+    <td>${escHtml(r.reason)}</td><td>${r.restocked ? 'Yes' : 'No'}</td><td>${escHtml(r.by)}</td></tr>`).join('');
+  const w = window.open('', '_blank');
+  w.document.write(`<html><head><title>Returns Report</title><style>
+    body{font-family:Arial,sans-serif;font-size:11px;margin:20px}
+    h2{margin:0 0 4px} p{margin:0 0 12px;color:#555}
+    table{width:100%;border-collapse:collapse} th,td{border:1px solid #ccc;padding:4px 6px;text-align:left}
+    th{background:#0c1f3f;color:#fff}</style></head><body>
+    <h2>Medicine Returns Report</h2>
+    <p>${escHtml(document.getElementById('rpFrom').value)} to ${escHtml(document.getElementById('rpTo').value)}
+       — ${document.getElementById('rpUnits').textContent} unit(s)</p>
+    <table><thead><tr><th>Date</th><th>Ret #</th><th>Patient</th><th>Medicine</th><th>Batch</th>
+    <th>Expiry</th><th>Qty</th><th>Reason</th><th>Restocked</th><th>By</th></tr></thead>
+    <tbody>${rowsHtml}</tbody></table></body></html>`);
+  w.document.close();
+  w.focus();
+  w.print();
+}
+
+resetLog();
+</script>
+{% endblock %}

@@ -161,6 +161,11 @@
     font-size: 12px;
 }
 
+.cr-tabs { display:flex; gap:8px; margin-bottom:16px; }
+.cr-tabs a { padding:8px 18px; border-radius:8px; font-size:13px; font-weight:600;
+             color:#475569; background:#fff; border:1px solid #e2e8f0; text-decoration:none; }
+.cr-tabs a.active { background:#1d4ed8; color:#fff; border-color:#1d4ed8; }
+
 /* zero highlight */
 .zero { color: #94a3b8; }
 /* negative balance */
@@ -190,6 +195,7 @@
     .main-header,
     .main-footer,
     .cr-controls,
+    .cr-tabs,
     .cr-summary,
     .cr-table-wrap,
     .cr-empty,
@@ -336,6 +342,14 @@
 
 
 {% block content %}
+
+<div class="cr-tabs">
+    <a href="?tab=summary" class="{% if active_tab != 'average' %}active{% endif %}">Monthly Consumption</a>
+    <a href="?tab=average" class="{% if active_tab == 'average' %}active{% endif %}">Average Consumption</a>
+</div>
+{% if active_tab == 'average' %}
+    {% include "consumption_average.html" %}
+{% else %}
 
 <!-- ── Controls ───────────────────────────────────────────────────────────── -->
 <form method="get" id="cr-form">
@@ -524,6 +538,8 @@
     </div>
 
 </div><!-- /printable -->
+
+{% endif %}
 
 {% endblock %}
 

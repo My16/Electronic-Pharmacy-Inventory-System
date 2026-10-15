@@ -46,6 +46,7 @@ class UserPermission(models.Model):
     suppliers          = models.BooleanField(default=False)
     reports            = models.BooleanField(default=False)
     consumption_report = models.BooleanField(default=False)
+    returns            = models.BooleanField(default=False)
 
     MODULE_CHOICES = [
         ("inventory",          "Medicine Inventory"),
@@ -57,6 +58,7 @@ class UserPermission(models.Model):
         ("suppliers",          "Suppliers"),
         ("reports",            "Reports & Analytics"),
         ("consumption_report", "Consumption Report"),
+        ("returns",            "Returns Management"),
     ]
 
     @classmethod
@@ -398,6 +400,11 @@ class MedicineStock(models.Model):
                          User, on_delete=models.SET_NULL,
                          null=True, blank=True)
 
+    location       = models.ForeignKey(
+                         'StorageLocation', on_delete=models.SET_NULL,
+                         null=True, blank=True, related_name='batches',
+                         help_text='Where this batch physically sits. Blank = the medicine\'s main location')
+
     def __str__(self):
         exp = str(self.expiry_date) if self.expiry_date else 'no expiry'
         return (f"{self.medicine.medicine_name} | "
@@ -436,6 +443,7 @@ class StockMovement(models.Model):
         ('expired',  'Expired Removal'),
         ('damaged',  'Damaged / Disposal'),
         ('audit',    'Audit Adjustment'),
+        ('transfer', 'Location Transfer'),
     ]
 
     medicine        = models.ForeignKey(
@@ -545,3 +553,77 @@ class DispensingItem(models.Model):
     class Meta:
         verbose_name        = 'Dispensing Item'
         verbose_name_plural = 'Dispensing Items'
+
+
+
+ 
+class MedicineReturn(models.Model):
+    """
+    Header row for one return event.
+      source = 'patient' → built from a patient's dispensing history (Tab 1)
+      source = 'log'     → free-form Return Log (Tab 2)
+    """
+    SOURCE_PATIENT = 'patient'
+    SOURCE_LOG     = 'log'
+    SOURCE_CHOICES = [
+        (SOURCE_PATIENT, 'Patient Return'),
+        (SOURCE_LOG,     'Return Log'),
+    ]
+ 
+    REASON_CHOICES = [
+        ('discharged', 'Patient Discharged'),
+        ('expired',    'Patient Expired'),
+        ('ward',       'Returned from Ward'),
+        ('others',     'Others'),
+    ]
+ 
+    source          = models.CharField(max_length=10, choices=SOURCE_CHOICES, default=SOURCE_LOG)
+    patient_name    = models.CharField(max_length=200, blank=True)
+    ihomis_hpatkey  = models.CharField(max_length=50, blank=True, default='', db_index=True)
+    ihomis_hpercode = models.CharField(max_length=50, blank=True, default='')
+    reason          = models.CharField(max_length=20, choices=REASON_CHOICES)
+    notes           = models.TextField(blank=True)
+    restocked       = models.BooleanField(
+                          default=True,
+                          help_text='True when the returned quantities were added back to stock')
+    returned_at     = models.DateTimeField(default=timezone.now)
+    processed_by    = models.ForeignKey(
+                          User, on_delete=models.SET_NULL,
+                          null=True, blank=True, related_name='medicine_returns')
+    created_at      = models.DateTimeField(auto_now_add=True)
+ 
+    def __str__(self):
+        return f"Return #{self.pk} — {self.patient_name or 'N/A'} ({self.get_reason_display()})"
+ 
+    class Meta:
+        ordering = ['-returned_at']
+        verbose_name        = 'Medicine Return'
+        verbose_name_plural = 'Medicine Returns'
+ 
+ 
+class MedicineReturnItem(models.Model):
+    medicine_return = models.ForeignKey(
+                          MedicineReturn, on_delete=models.CASCADE, related_name='items')
+    medicine        = models.ForeignKey(
+                          Medicine, on_delete=models.PROTECT, related_name='return_items')
+    # Set for Tab 1 returns so we can track how much of a dispensed line is already returned
+    dispensing_item = models.ForeignKey(
+                          DispensingItem, on_delete=models.SET_NULL,
+                          null=True, blank=True, related_name='returns')
+    quantity        = models.PositiveIntegerField()
+ 
+    # The batch these units went back into (blank for record-only returns).
+    # batch_number / expiry_date are snapshots so reports stay correct even if
+    # the batch is edited later.
+    batch           = models.ForeignKey(
+                          MedicineStock, on_delete=models.SET_NULL,
+                          null=True, blank=True, related_name='return_items')
+    batch_number    = models.CharField(max_length=100, blank=True)
+    expiry_date     = models.DateField(null=True, blank=True)
+ 
+    def __str__(self):
+        return f"{self.medicine.medicine_name} x{self.quantity}"
+ 
+    class Meta:
+        verbose_name        = 'Medicine Return Item'
+        verbose_name_plural = 'Medicine Return Items'

@@ -190,6 +190,30 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
 .toast{position:fixed;bottom:26px;right:26px;background:#1a2433;color:#fff;padding:11px 16px;border-radius:10px;font-size:12.5px;font-weight:500;display:flex;align-items:center;gap:9px;box-shadow:0 8px 24px rgba(0,0,0,.2);z-index:9999;transform:translateY(70px);opacity:0;transition:transform .3s cubic-bezier(.34,1.56,.64,1),opacity .3s;pointer-events:none;max-width:360px}
 .toast.show{transform:translateY(0);opacity:1}.toast.success i{color:#4ade80}.toast.error i{color:#f87171}
 
+
+/* ── Expiring soon indicator ── */
+.shelf.expiring{background:rgba(239,68,68,.08);border-color:#dc2626}
+.shelf-flag{position:absolute;top:0;right:0;display:inline-flex;align-items:center;gap:3px;background:#dc2626;color:#fff;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:0 7px 0 7px}
+.legend i.exp{background:rgba(239,68,68,.08);border-color:#dc2626}
+.loc-pill.exp{background:rgba(239,68,68,.1);color:#dc2626;margin-right:-2px}
+.sum-chip.danger strong{color:#dc2626}
+
+/* ── Transfer ── */
+.btn-soft.sm{padding:5px 11px;font-size:11.5px;white-space:nowrap}
+.xfer-card{display:flex;align-items:center;gap:12px;background:#f8fafc;border:1px solid #eef2f7;border-radius:10px;padding:12px 14px;margin-bottom:14px}
+.xfer-card .xc-main{flex:1;min-width:0}
+.xfer-card .xc-name{font-size:13.5px;font-weight:700;color:#1a2433}
+.xfer-card .xc-sub{font-size:11.5px;color:#94a3b8;margin-top:2px}
+.xfer-stats{display:flex;gap:10px;margin-bottom:14px}
+.xfer-stats .sum-chip{flex:1;justify-content:space-between}
+.qty-row{display:flex;gap:8px}.qty-row .form-control{flex:1}
+.xfer-preview{margin-top:14px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;background:rgba(0,173,181,.06);border:1px solid rgba(0,173,181,.25);border-radius:10px;padding:12px 14px;font-size:12px;color:#007c83}
+.xfer-preview .xp-box{text-align:center}.xfer-preview .xp-box strong{display:block;font-size:18px;color:#1a2433}
+.xfer-preview .xp-arrow{color:#00ADB5;font-size:16px}
+.xfer-preview.bad{background:rgba(239,68,68,.06);border-color:rgba(239,68,68,.25);color:#dc2626}
+.xfer-total{text-align:center;font-size:11.5px;color:#78909c;margin-top:8px}
+
+
 @media (max-width:1100px){
     .plan-layout{grid-template-columns:1fr}
     .stats-row{grid-template-columns:repeat(2,1fr)}
@@ -268,6 +292,7 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
         <span><i></i> Empty</span>
         <span><i class="has"></i> Has medicines</span>
         <span><i class="warn"></i> Has low / out-of-stock medicines</span>
+        <span><i class="exp"></i> Has medicines expiring soon / expired (≤ 90 days)</span>
         <span><i class="dark"></i> Landmark (not storage)</span>
     </div>
 </div>
@@ -356,6 +381,50 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
     </div>
 </div>
 
+<!-- ── TRANSFER MEDICINE ─────────────────────────────────── -->
+<div class="modal-overlay" id="xferModal">
+    <div class="modal" style="max-width:500px">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title"><i class="fas fa-right-left"></i>Transfer Medicine</div>
+                <div class="modal-sub">Move some or all stock to another location</div>
+            </div>
+            <button class="modal-close" onclick="closeModal('xferModal')"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <div class="xfer-card">
+                <div class="xc-main"><div class="xc-name" id="xName">—</div><div class="xc-sub" id="xSub"></div></div>
+                <span class="find-loc" id="xFrom">—</span>
+            </div>
+            <div class="xfer-stats">
+                <div class="sum-chip"><span>Stored here</span><strong id="xAvail">0</strong></div>
+                <div class="sum-chip"><span>Total (all locations)</span><strong id="xTotal">0</strong></div>
+            </div>
+            <div class="form-grid">
+                <div class="form-group" style="grid-column:span 2"><label class="form-label">Transfer To *</label>
+                    <select id="xTo" class="form-control" onchange="updateXferPreview()"></select></div>
+                <div class="form-group" style="grid-column:span 2"><label class="form-label">Quantity to Move *</label>
+                    <div class="qty-row">
+                        <input type="number" id="xQty" class="form-control" min="1" step="1" placeholder="0" oninput="updateXferPreview()">
+                        <button type="button" class="btn-soft" onclick="xferAll()">Move all</button>
+                    </div></div>
+                <div class="form-group" style="grid-column:span 2"><label class="form-label">Notes</label>
+                    <input type="text" id="xNotes" class="form-control" maxlength="300" placeholder="Optional, e.g. overflow to pharmacy"></div>
+            </div>
+            <div class="xfer-preview" id="xPreview">
+                <div class="xp-box"><span id="xKeepLbl">Stays</span><strong id="xKeep">0</strong></div>
+                <i class="fas fa-arrow-right xp-arrow"></i>
+                <div class="xp-box"><span id="xGetLbl">Receives</span><strong id="xGet">0</strong></div>
+            </div>
+            <div class="xfer-total" id="xTotalNote"></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="cancelTransfer()">Back</button>
+            <button type="button" class="btn-submit" id="xSubmit" onclick="submitTransfer()"><i class="fas fa-right-left" style="margin-right:5px"></i>Transfer</button>
+        </div>
+    </div>
+</div>
+
 <!-- ── DISCARD LAYOUT CHANGES ────────────────────────────── -->
 <div class="modal-overlay" id="discardModal">
     <div class="modal modal-sm">
@@ -413,7 +482,8 @@ var URLS = {
     area_delete:   "{% url 'storage_area_delete' pk=0 %}",
     loc_create:    "{% url 'storage_location_create' %}",
     loc_update:    "{% url 'storage_location_update' pk=0 %}",
-    loc_delete:    "{% url 'storage_location_delete' pk=0 %}"
+    loc_delete:    "{% url 'storage_location_delete' pk=0 %}",
+    transfer:      "{% url 'storage_location_transfer' %}",
 };
 function u(tpl, pk) { var i = tpl.lastIndexOf('/0/'); return tpl.slice(0, i) + '/' + pk + '/' + tpl.slice(i + 3); }
 function esc(s) {
@@ -511,7 +581,7 @@ function renderCanvas() {
         var el = document.createElement('div');
         var cls = 'shelf';
         if (l.kind === 'landmark') cls += ' landmark';
-        else { if (l.count) cls += ' has-meds'; if (l.alert) cls += ' alert'; }
+            else { if (l.count) cls += ' has-meds'; if (l.alert) cls += ' alert'; if (l.expiring) cls += ' expiring'; }
         el.className = cls;
         el.id = 'shelf-' + l.id;
         el.dataset.id = l.id;
@@ -521,6 +591,9 @@ function renderCanvas() {
         if (l.kind === 'shelf') {
             inner += '<span class="shelf-count' + (l.count ? (l.alert ? ' warn' : '') : ' empty') + '">' +
                      l.count + ' med' + (l.count === 1 ? '' : 's') + '</span>';
+        }
+        if (l.kind === 'shelf' && l.expiring) {
+            inner += '<span class="shelf-flag" title="' + l.expiring + ' medicine(s) expiring soon or expired"><i class="fas fa-hourglass-half"></i> ' + l.expiring + '</span>';
         }
         el.innerHTML = inner;
         if (state.edit) {
@@ -555,13 +628,15 @@ function renderList() {
         var pill = l.kind === 'landmark'
             ? '<span class="loc-pill landmark">Landmark</span>'
             : '<span class="loc-pill' + (l.count ? (l.alert ? ' warn' : '') : ' zero') + '">' + l.count + '</span>';
+        var expPill = (l.kind === 'shelf' && l.expiring)
+            ? '<span class="loc-pill exp" title="Expiring soon / expired"><i class="fas fa-hourglass-half" style="font-size:9px"></i> ' + l.expiring + '</span>' : '';
         var btns = '';
         if (CAN_MANAGE) btns += '<button type="button" class="btn-icon edit sm" title="Edit" onclick="event.stopPropagation();openLocModal(' + l.id + ')"><i class="fas fa-pen-to-square"></i></button>';
         if (CAN_ADMIN)  btns += '<button type="button" class="btn-icon delete sm" title="Remove" onclick="event.stopPropagation();openDeleteLoc(' + l.id + ')"><i class="fas fa-trash-can"></i></button>';
         return '<div class="loc-item" data-id="' + l.id + '" onclick="listClick(' + l.id + ')" onmouseenter="hlShelf(' + l.id + ',true)" onmouseleave="hlShelf(' + l.id + ',false)">' +
                '<div class="loc-item-main"><div class="loc-item-code">' + esc(l.code) + '</div>' +
                '<div class="loc-item-sub">' + esc(l.name || (l.kind === 'landmark' ? 'Not a storage location' : 'No display name')) + '</div></div>' +
-               pill + btns + '</div>';
+               expPill + pill + btns + '</div>';
     }).join('');
 }
 
@@ -609,12 +684,17 @@ function openMeds(id) {
         .then(function(r) { return r.json(); })
         .then(function(data) {
             state.medsRows = data.medicines;
-            var out = 0, low = 0, units = 0;
-            data.medicines.forEach(function(m) { units += Number(m.qty) || 0; if (m.status === 'out') out++; if (m.status === 'low') low++; });
+            var out = 0, low = 0, units = 0, exp = 0;
+            data.medicines.forEach(function(m) {
+                units += Number(m.qty) || 0;
+                if (m.status === 'out') out++; if (m.status === 'low') low++;
+                if (m.expiry_state === 'soon' || m.expiry_state === 'expired') exp++;
+            });
             document.getElementById('medsSummary').innerHTML =
                 '<div class="sum-chip"><strong>' + data.medicines.length + '</strong> medicine' + (data.medicines.length === 1 ? '' : 's') + '</div>' +
-                '<div class="sum-chip"><strong>' + units + '</strong> total units</div>' +
-                ((low + out) ? '<div class="sum-chip warn"><strong>' + (low + out) + '</strong> low / out of stock</div>' : '');
+                '<div class="sum-chip"><strong>' + units + '</strong> units stored here</div>' +
+                ((low + out) ? '<div class="sum-chip warn"><strong>' + (low + out) + '</strong> low / out of stock</div>' : '') +
+                (exp ? '<div class="sum-chip danger"><strong>' + exp + '</strong> expiring soon / expired</div>' : '');
             renderMeds('');
         })
         .catch(function() {
@@ -630,22 +710,29 @@ function renderMeds(q) {
     var box = document.getElementById('medsList');
     if (!rows.length) {
         box.innerHTML = '<div class="empty-state"><i class="fas fa-pills"></i><p>' +
-            (state.medsRows.length ? 'No medicines match your filter.' : 'No medicines are stored here yet.<br>Assign this location when adding or editing a medicine in Inventory.') + '</p></div>';
+            (state.medsRows.length ? 'No medicines match your filter.' : 'No medicines are stored here yet.<br>Assign this location when adding or editing a medicine in Inventory, or transfer stock here from another location.') + '</p></div>';
         return;
     }
-    var html = '<table class="data-table"><thead><tr><th>Medicine</th><th>Form</th><th>Stock</th><th>Status</th><th>Earliest Expiry</th></tr></thead><tbody>';
+    var html = '<table class="data-table"><thead><tr><th>Medicine</th><th>Form</th><th>Stored Here</th><th>Status</th><th>Earliest Expiry</th>' + (CAN_MANAGE ? '<th></th>' : '') + '</tr></thead><tbody>';
     rows.forEach(function(m) {
         var cls = m.status === 'out' ? 'out-stock' : (m.status === 'low' ? 'low-stock' : 'in-stock');
         var txt = m.status === 'out' ? 'Out of Stock' : (m.status === 'low' ? 'Low Stock' : 'In Stock');
         var color = m.status === 'out' ? '#dc2626' : (m.status === 'low' ? '#d97706' : '#16a34a');
         var sub = [m.generic, m.brand, m.strength].filter(Boolean).join(' · ');
+        var expHtml = !m.expiry ? '<span style="font-size:11.5px;color:#b0bec5">No expiry set</span>'
+            : '<span class="expiry-badge ' + m.expiry_state + '">' +
+              (m.expiry_state !== 'ok' ? '<i class="fas fa-hourglass-half" style="font-size:9px"></i> ' : '') + esc(m.expiry) + '</span>';
         html += '<tr><td><div class="med-name"><a class="med-link" href="' + URLS.inventory + '?highlight=' + m.id + '" title="Open in Inventory">' + esc(m.name) + '</a>' +
                 (m.s2 ? '<span class="s2-chip"><i class="fas fa-shield-halved" style="font-size:9px"></i> S2</span>' : '') + '</div>' +
                 '<div class="med-sub">' + esc(sub) + '</div></td>' +
                 '<td style="color:#64748b">' + esc(m.form || '—') + '</td>' +
-                '<td style="font-weight:700;color:' + color + '">' + esc(m.qty) + '</td>' +
+                '<td><span style="font-weight:700;color:' + color + '">' + esc(m.qty) + '</span>' +
+                    (m.total !== m.qty ? '<div class="med-sub">of ' + esc(m.total) + ' total</div>' : '') + '</td>' +
                 '<td><span class="stock-badge ' + cls + '"><span class="stock-dot"></span>' + txt + '</span></td>' +
-                '<td>' + (m.expiry ? '<span class="expiry-badge ' + m.expiry_state + '">' + esc(m.expiry) + '</span>' : '<span style="font-size:11.5px;color:#b0bec5">No expiry set</span>') + '</td></tr>';
+                '<td>' + expHtml + '</td>' +
+                (CAN_MANAGE ? '<td style="text-align:right">' + (m.qty > 0
+                    ? '<button type="button" class="btn-soft sm" onclick="openTransfer(' + m.id + ')"><i class="fas fa-right-left"></i> Transfer</button>' : '') + '</td>' : '') +
+                '</tr>';
     });
     box.innerHTML = html + '</tbody></table>';
 }
@@ -704,6 +791,80 @@ function openAreaModal(editing) {
     }
     openModal('areaModal');
     setTimeout(function() { document.getElementById('a_name').focus(); }, 50);
+}
+
+/* ── Transfer medicine between locations ───────────────── */
+var xfer = { med: null, from: null, avail: 0 };
+
+function openTransfer(medId) {
+    if (!CAN_MANAGE) return;
+    var m = null, src = locById(state.currentLoc);
+    state.medsRows.forEach(function(r) { if (r.id === medId) m = r; });
+    if (!m || !src) return;
+    xfer = { med: m, from: src, avail: Number(m.qty) || 0 };
+
+    var html = '', n = 0;
+    PLAN.forEach(function(a) {
+        var opts = a.locations.filter(function(l) { return l.kind === 'shelf' && l.id !== src.id; });
+        if (!opts.length) return;
+        html += '<optgroup label="' + esc(a.name) + '">' + opts.map(function(l) {
+            n++; return '<option value="' + l.id + '">' + esc(l.code) + (l.name && l.name !== l.code ? ' — ' + esc(l.name) : '') + '</option>';
+        }).join('') + '</optgroup>';
+    });
+    if (!n) { showToast('Add another storage location first.', 'error'); return; }
+
+    document.getElementById('xTo').innerHTML = html;
+    document.getElementById('xName').textContent = m.name + (m.strength ? ' ' + m.strength : '');
+    document.getElementById('xSub').textContent = [m.generic, m.form].filter(Boolean).join(' · ');
+    document.getElementById('xFrom').textContent = src.code;
+    document.getElementById('xAvail').textContent = xfer.avail;
+    document.getElementById('xTotal').textContent = m.total;
+    var q = document.getElementById('xQty'); q.value = ''; q.max = xfer.avail;
+    document.getElementById('xNotes').value = '';
+    updateXferPreview();
+    closeModal('medsModal');
+    openModal('xferModal');
+    setTimeout(function() { q.focus(); }, 50);
+}
+function xferAll() { document.getElementById('xQty').value = xfer.avail; updateXferPreview(); }
+function cancelTransfer() { closeModal('xferModal'); if (xfer.from) openMeds(xfer.from.id); }
+
+function updateXferPreview() {
+    var q = parseInt(document.getElementById('xQty').value, 10) || 0;
+    var dstSel = document.getElementById('xTo'), dst = locById(Number(dstSel.value));
+    var bad = q < 0 || q > xfer.avail;
+    var box = document.getElementById('xPreview');
+    box.classList.toggle('bad', bad);
+    document.getElementById('xKeepLbl').textContent = xfer.from ? xfer.from.code + ' keeps' : 'Stays';
+    document.getElementById('xGetLbl').textContent  = (dst ? dst.code : 'Destination') + ' receives';
+    document.getElementById('xKeep').textContent = bad ? '—' : (xfer.avail - q);
+    document.getElementById('xGet').textContent  = bad ? '—' : q;
+    document.getElementById('xTotalNote').textContent = bad
+        ? 'Only ' + xfer.avail + ' unit(s) are stored in ' + (xfer.from ? xfer.from.code : 'this location') + '.'
+        : 'Total stock stays at ' + (xfer.med ? xfer.med.total : 0) + ' — nothing is added or removed.';
+}
+
+function submitTransfer() {
+    var q = parseInt(document.getElementById('xQty').value, 10) || 0;
+    var to = Number(document.getElementById('xTo').value);
+    if (q <= 0) { showToast('Enter a quantity to move.', 'error'); return; }
+    if (q > xfer.avail) { showToast('Only ' + xfer.avail + ' unit(s) available here.', 'error'); return; }
+    var btn = document.getElementById('xSubmit'); btn.disabled = true;
+    fetch(URLS.transfer, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ medicine_id: xfer.med.id, from_id: xfer.from.id, to_id: to, quantity: q,
+                               notes: document.getElementById('xNotes').value })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+        if (d.ok) {
+            // reload so the plan, counts and flags refresh; the success message shows as a toast
+            var area = areaOfLoc(xfer.from.id);
+            window.location.href = window.location.pathname + '?area=' + (area ? area.id : '') + '&open=' + xfer.from.id;
+        } else { btn.disabled = false; showToast(d.error || 'Transfer failed.', 'error'); }
+    })
+    .catch(function() { btn.disabled = false; showToast('Network error.', 'error'); });
 }
 
 /* ── Delete ────────────────────────────────────────────── */
@@ -876,7 +1037,7 @@ function debounceFind(q) {
                 } else {
                     box.innerHTML = d.results.map(function(r) {
                         return '<div class="find-item" onclick="goToLoc(' + r.area_id + ',' + r.loc_id + ')">' +
-                               '<div>' + esc(r.name) + '<small>' + esc(r.strength) + ' · ' + esc(r.area) + '</small></div>' +
+                               '<div>' + esc(r.name) + '<small>' + esc(r.strength) + ' · ' + esc(r.area) + ' · ' + r.qty + ' pcs</small></div>' +
                                '<span class="find-loc">' + esc(r.code) + '</span></div>';
                     }).join('');
                 }

@@ -135,6 +135,8 @@ textarea.form-control{resize:vertical;min-height:70px}
 .move-badge.adjust{background:rgba(59,130,246,.1);color:#2563eb}.move-badge.return{background:rgba(139,92,246,.1);color:#7c3aed}
 .move-badge.expired{background:rgba(245,158,11,.1);color:#d97706}.move-badge.damaged{background:rgba(107,114,128,.1);color:#6b7280}
 .move-badge.audit{background:rgba(20,184,166,.1);color:#0f766e}
+.move-badge.transfer{background:rgba(0,173,181,.1);color:#00ADB5}
+.loc-tag{display:inline-flex;align-items:center;gap:3px;background:rgba(0,173,181,.1);color:#00ADB5;border-radius:20px;padding:0 7px;font-size:10px;font-weight:700;margin-left:4px}
 .qty-cell{font-weight:700;font-size:13px}
 .qty-cell.positive{color:#16a34a}.qty-cell.negative{color:#dc2626}.qty-cell.neutral{color:#2563eb}
 .med-name-cell{font-weight:600;color:#1a2433;font-size:12.5px}.med-sub-cell{font-size:11px;color:#94a3b8;margin-top:1px}
@@ -388,16 +390,24 @@ textarea.form-control{resize:vertical;min-height:70px}
                             {% elif mv.movement_type == 'expired' %}<i class="fas fa-calendar-xmark"></i> Expired
                             {% elif mv.movement_type == 'damaged' %}<i class="fas fa-trash-can"></i> Damaged
                             {% elif mv.movement_type == 'audit' %}<i class="fas fa-clipboard-check"></i> Audit
+                            {% elif mv.movement_type == 'transfer' %}<i class="fas fa-right-left"></i> Transfer
                             {% endif %}
                         </span>
                     </td>
-                    <td><span class="qty-cell {% if mv.quantity > 0 %}positive{% elif mv.quantity < 0 %}negative{% else %}neutral{% endif %}">{% if mv.quantity > 0 %}+{% endif %}{{ mv.quantity }}</span></td>
+                    <td>
+                        {% if mv.movement_type == 'transfer' %}
+                            <span class="qty-cell neutral" title="Total stock unchanged"><i class="fas fa-right-left" style="font-size:11px"></i></span>
+                        {% else %}
+                            <span class="qty-cell {% if mv.quantity > 0 %}positive{% elif mv.quantity < 0 %}negative{% else %}neutral{% endif %}">{% if mv.quantity > 0 %}+{% endif %}{{ mv.quantity }}</span>
+                        {% endif %}
+                    </td>
                     <td style="color:#94a3b8;font-size:12.5px">{{ mv.quantity_before }}</td>
                     <td style="font-weight:600;color:#1a2433;font-size:12.5px">{{ mv.quantity_after }}</td>
                     <td style="font-size:12px;color:#64748b">
                         {% if mv.reference_no %}<span style="font-family:monospace;background:#f0f4f8;padding:2px 6px;border-radius:5px">{{ mv.reference_no }}</span>
                         {% elif mv.prescription_no %}<span style="color:#94a3b8">Rx: {{ mv.prescription_no }}</span>
                         {% else %}<span style="color:#d1d9e0">—</span>{% endif %}
+                        {% if mv.movement_type == 'transfer' and mv.notes %}<div style="font-size:10.5px;color:#94a3b8;margin-top:3px;max-width:230px">{{ mv.notes }}</div>{% endif %}
                     </td>
                     <td>
                         {% if mv.performed_by %}
@@ -650,7 +660,7 @@ function renderBatchList(tab, batches) {
                     <span class="bi-batch">${escHtml(b.batch_number || 'No batch no.')}</span>
                     ${chip}
                 </div>
-                <div class="bi-expiry">Exp: ${escHtml(expiryTxt)} · ₱${b.purchase_price}/unit</div>
+                <div class="bi-expiry">Exp: ${escHtml(expiryTxt)} · ₱${b.purchase_price}/unit${b.location ? ' <span class="loc-tag"><i class="fas fa-location-dot" style="font-size:8px"></i> ' + escHtml(b.location) + '</span>' : ''}</div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
                 <span class="bi-qty">${b.quantity} units</span>

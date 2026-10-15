@@ -68,6 +68,22 @@ from django.db.models import (
 )
 
 
+import json
+ 
+from django.shortcuts import render, get_object_or_404
+from django.http import JsonResponse
+from django.db import transaction
+from django.db.models import Sum, F
+from django.utils import timezone
+from django.views.decorators.http import require_GET, require_POST
+ 
+from .models import (
+    Medicine, MedicineStock, StockMovement, Dispensing, DispensingItem,
+    MedicineReturn, MedicineReturnItem,
+)
+from .ihomis_models import HPerson
+from .permissions import require
+
 
 def _deduct_fefo(medicine, qty_needed, performed_by,
                  movement_type='out', dispensed_to='',
@@ -293,6 +309,31 @@ def dashboard_view(request):
 # INVENTORY
 # ─────────────────────────────────────────────────────────────────────────────
 
+
+def _attach_locations(meds):
+    """Adds m.loc_list = [{'loc': StorageLocation, 'qty': int}], main location first.
+    A batch with no location counts as the medicine's main location."""
+    splits = {}
+    for m in meds:
+        s = {}
+        for b in m.batches.all():              # already prefetched
+            if b.quantity <= 0:
+                continue
+            lid = b.location_id or m.location_id
+            if lid:
+                s[lid] = s.get(lid, 0) + b.quantity
+        if not s and m.location_id:            # main location assigned but no stock yet
+            s[m.location_id] = 0
+        splits[m.pk] = s
+
+    ids  = {lid for s in splits.values() for lid in s}
+    locs = StorageLocation.objects.select_related('area').in_bulk(ids)
+    for m in meds:
+        items = [{'loc': locs[lid], 'qty': q} for lid, q in splits[m.pk].items() if lid in locs]
+        items.sort(key=lambda i: (i['loc'].pk != m.location_id, -i['qty']))
+        m.loc_list = items
+
+
 @require('inventory')
 def inventory_view(request):
     today            = timezone.now().date()
@@ -313,7 +354,9 @@ def inventory_view(request):
 
     medicines_qs = Medicine.objects.select_related('category', 'supplier', 'location').filter(
         is_active=True
-    ).prefetch_related('batches')
+    ).prefetch_related(
+        Prefetch('batches', queryset=MedicineStock.objects.select_related('location', 'supplier'))
+    )
 
     if search:
         medicines_qs = medicines_qs.filter(
@@ -353,6 +396,9 @@ def inventory_view(request):
     except (EmptyPage, PageNotAnInteger):
         page_obj = paginator.page(1)
 
+    rows = list(page_obj.object_list)
+    _attach_locations(rows)
+
     # Alert panel items
     all_active = list(Medicine.objects.filter(is_active=True).prefetch_related('batches'))
     low_stock_items   = sorted([m for m in all_active if m.is_low_stock],
@@ -368,7 +414,7 @@ def inventory_view(request):
 
     context = {
         'page_obj':     page_obj,
-        'medicines':    page_obj.object_list,
+        'medicines':    rows,
         'paginator':    paginator,
         'per_page':     per_page,
         'per_page_options': [10, 15, 25, 50, 100],
@@ -721,7 +767,9 @@ def stock_in_view(request):
             # Try to match existing batch by batch_number (if provided)
             batch = None
             if batch_number:
-                batch = medicine.batches.filter(batch_number=batch_number).first()
+                batch = (medicine.batches.filter(batch_number=batch_number)
+                         .filter(Q(location__isnull=True) | Q(location=medicine.location))
+                         .first())
 
             if batch:
                 # Update existing batch quantity
@@ -890,7 +938,7 @@ def stock_medicine_info(request):
     if not pk:
         return JsonResponse({'found': False})
     try:
-        m = Medicine.objects.prefetch_related('batches').get(pk=pk, is_active=True)
+        m = Medicine.objects.select_related('location').prefetch_related('batches').get(pk=pk, is_active=True)
         fefo = m.batches.filter(quantity__gt=0).order_by(
             F('expiry_date').asc(nulls_last=True), 'received_at'
         ).first()
@@ -906,8 +954,9 @@ def stock_medicine_info(request):
                 'supplier_id':    b.supplier_id or '',
                 'is_expired':     b.is_expired,
                 'is_expiring':    b.is_expiring_soon,
+                'location':       (b.location.code if b.location else (m.location.code if m.location else '')),
             }
-            for b in m.batches.filter(quantity__gt=0).order_by(
+            for b in m.batches.filter(quantity__gt=0).select_related('location').order_by(
                 F('expiry_date').asc(nulls_last=True), 'received_at'
             )
         ]
@@ -2197,6 +2246,169 @@ def report_export_pdf(request):
     return response
 
 
+
+
+AVG_PERIOD_CHOICES = [('monthly', 'Monthly'), ('quarterly', 'Quarterly'), ('yearly', 'Yearly')]
+QUARTER_CHOICES = [
+    (1, '1st Quarter (Jan–Mar)'),
+    (2, '2nd Quarter (Apr–Jun)'),
+    (3, '3rd Quarter (Jul–Sep)'),
+    (4, '4th Quarter (Oct–Dec)'),
+]
+ 
+ 
+def _consumption_by_month(start, end):
+    """
+    {medicine_id: {(year, month): consumed}} for start <= created_at < end.
+    Uses the same definition of "consumed" as the monthly report:
+    dispensed items + expired/damaged removals (the 'out' movement is NOT
+    counted again because dispensing already writes it).
+    """
+    out = {}
+ 
+    def add(med_id, dt, qty):
+        key = (dt.year, dt.month)
+        bucket = out.setdefault(med_id, {})
+        bucket[key] = bucket.get(key, 0) + qty
+ 
+    dispensed = (
+        DispensingItem.objects
+        .filter(dispensing__created_at__gte=start, dispensing__created_at__lt=end)
+        .annotate(m=TruncMonth('dispensing__created_at'))
+        .values('medicine_id', 'm')
+        .annotate(t=Sum('quantity'))
+    )
+    for r in dispensed:
+        add(r['medicine_id'], r['m'], r['t'] or 0)
+ 
+    manual = (
+        StockMovement.objects
+        .filter(movement_type__in=['expired', 'damaged'],
+                created_at__gte=start, created_at__lt=end)
+        .annotate(m=TruncMonth('created_at'))
+        .values('medicine_id', 'm')
+        .annotate(t=Sum('quantity'))
+    )
+    for r in manual:
+        add(r['medicine_id'], r['m'], abs(r['t'] or 0))
+ 
+    return out
+ 
+ 
+def average_consumption_context(request, submitted_by, position):
+    today = timezone.localdate()
+ 
+    period = request.GET.get('period', 'monthly')
+    if period not in dict(AVG_PERIOD_CHOICES):
+        period = 'monthly'
+ 
+    try:
+        year    = int(request.GET.get('year', today.year))
+        month   = int(request.GET.get('month', today.month))
+        quarter = int(request.GET.get('quarter', (today.month - 1) // 3 + 1))
+        if not (1 <= month <= 12 and 1 <= quarter <= 4):
+            raise ValueError
+    except (ValueError, TypeError):
+        year, month, quarter = today.year, today.month, (today.month - 1) // 3 + 1
+ 
+    # ── Period definition ────────────────────────────────────────────────────
+    if period == 'monthly':
+        first_month, n_months = month, 1
+        label = f'{calendar.month_name[month]} {year}'
+    elif period == 'quarterly':
+        first_month, n_months = (quarter - 1) * 3 + 1, 3
+        label = (f'{dict(QUARTER_CHOICES)[quarter]} {year}')
+    else:
+        first_month, n_months = 1, 12
+        label = f'January–December {year}'
+ 
+    end_idx   = first_month - 1 + n_months          # 0-based month index from Jan of `year`
+    end_year  = year + end_idx // 12
+    end_month = end_idx % 12 + 1
+    start = timezone.make_aware(datetime(year, first_month, 1))
+    end   = timezone.make_aware(datetime(end_year, end_month, 1))
+ 
+    months = [(year, first_month + i) for i in range(n_months)]
+    month_labels = [calendar.month_abbr[m] for _, m in months]
+ 
+    # ── Divisors (cap at today when the period is still running) ─────────────
+    total_days = (end.date() - start.date()).days
+    if today < start.date():
+        days_counted = 0
+    elif today < end.date():
+        days_counted = (today - start.date()).days + 1
+    else:
+        days_counted = total_days
+    is_partial = days_counted < total_days
+    months_counted = round(n_months * days_counted / total_days, 2) if total_days else 0
+    day_div   = days_counted or 1
+    month_div = months_counted or 1
+
+
+    stock_map = dict(
+        MedicineStock.objects
+        .filter(medicine__is_active=True, quantity__gt=0)
+        .order_by()
+        .values_list('medicine_id')
+        .annotate(t=Sum('quantity'))
+    )
+ 
+    # ── Rows ─────────────────────────────────────────────────────────────────
+    data = _consumption_by_month(start, end)
+    rows = []
+    month_totals = [0] * n_months
+    for med in Medicine.objects.filter(is_active=True).order_by('medicine_name'):
+        per_month = data.get(med.pk, {})
+        vals  = [per_month.get(k, 0) for k in months]
+        total = sum(vals)
+        for i, v in enumerate(vals):
+            month_totals[i] += v
+        avg_month = round(total / month_div, 2)
+        stock     = stock_map.get(med.pk, 0)
+        rows.append({
+            'item_code':       med.barcode or f"MED-{med.pk:04d}",
+            'description':     f"{med.medicine_name} {med.strength}",
+            'unit_of_measure': med.dosage_form,
+            'months':          vals,
+            'total':           total,
+            'avg_month':       avg_month,
+            'avg_day':         round(total / day_div, 2),
+            'stock':           stock,
+            'months_left':     round(stock / avg_month, 1) if avg_month else None,
+        })
+ 
+    total_consumed = sum(r['total'] for r in rows)
+    total_stock    = sum(r['stock'] for r in rows)
+ 
+    return {
+        'active_tab':       'average',
+        'period':           period,
+        'period_choices':   AVG_PERIOD_CHOICES,
+        'period_title':     dict(AVG_PERIOD_CHOICES)[period],
+        'period_label':     label,
+        'quarter_choices':  QUARTER_CHOICES,
+        'selected_quarter': quarter,
+        'selected_month':   month,
+        'selected_year':    year,
+        'month_choices':    [(i, calendar.month_name[i]) for i in range(1, 13)],
+        'year_choices':     list(range(today.year - 3, today.year + 2)),
+        'rows':             rows,
+        'show_breakdown':   n_months > 1,
+        'month_labels':     month_labels,
+        'month_totals':     month_totals,
+        'total_consumed':   total_consumed,
+        'total_stock':      total_stock,
+        'total_avg_month':  round(total_consumed / month_div, 2),
+        'total_avg_day':    round(total_consumed / day_div, 2),
+        'days_counted':     days_counted,
+        'months_counted':   months_counted,
+        'is_partial':       is_partial,
+        'submitted_by':     submitted_by,
+        'position':         position,
+    }
+
+
+
 @require('consumption_report')
 def consumption_report(request):
     # Helper function to format name with middle initial
@@ -2220,6 +2432,13 @@ def consumption_report(request):
             formatted = f"{first_name.upper()} {last_name.upper()}"
         
         return formatted.strip() or user.username.upper()
+
+    # ── Average Consumption tab: return early, skip the monthly calculation ──
+    if request.GET.get('tab') == 'average':
+        submitted_by = get_formatted_name(request.user)
+        position = request.user.profile.position if hasattr(request.user, 'profile') else '—'
+        return render(request, 'consumption_report.html',
+                      average_consumption_context(request, submitted_by, position))
 
     # ── 1. Resolve selected month/year ────────────────────────────────────────
     today = timezone.now().date()
@@ -3036,28 +3255,67 @@ def _to_int(value):
         return None
 
 
-def _active_meds_qs():
-    """Active medicines with total stock computed in ONE query."""
-    return Medicine.objects.filter(is_active=True).annotate(total_qty=Sum('batches__quantity'))
+EXPIRY_WINDOW_DAYS = 90
+
+
+def _live_meds_qs():
+    """Active medicines with their in-stock batches preloaded (one extra query)."""
+    return Medicine.objects.filter(is_active=True).prefetch_related(
+        Prefetch('batches', queryset=MedicineStock.objects.filter(quantity__gt=0),
+                 to_attr='live_batches')
+    )
+
+
+def _med_split(m):
+    """{location_id: {'qty': n, 'expiry': earliest_date|None}} for one medicine.
+    A batch with no location counts as the medicine's main location."""
+    split = {}
+    if m.location_id:
+        split[m.location_id] = {'qty': 0, 'expiry': None}
+    for b in m.live_batches:
+        lid = b.location_id or m.location_id
+        if not lid:
+            continue
+        e = split.setdefault(lid, {'qty': 0, 'expiry': None})
+        e['qty'] += b.quantity
+        if b.expiry_date and (e['expiry'] is None or b.expiry_date < e['expiry']):
+            e['expiry'] = b.expiry_date
+    return split
+
+
+def _placements():
+    """{location_id: {medicine_id: {'med', 'qty', 'expiry'}}}"""
+    out = {}
+    for m in _live_meds_qs():
+        m.total_qty = sum(b.quantity for b in m.live_batches)
+        for lid, e in _med_split(m).items():
+            out.setdefault(lid, {})[m.pk] = {'med': m, 'qty': e['qty'], 'expiry': e['expiry']}
+    return out
 
 
 def _stock_state(m):
+    """Status is based on the medicine's TOTAL stock across all locations."""
     qty = m.total_qty or 0
     if qty == 0:
         return 'out'
     return 'low' if qty <= m.reorder_level else 'ok'
 
 
+def _loc_has_stock(loc):
+    if loc.medicines.filter(is_active=True).exists():
+        return True
+    return MedicineStock.objects.filter(
+        medicine__is_active=True, quantity__gt=0, location=loc
+    ).exists()
+
+
 @require('storage_locations')
 def storage_locations(request):
+    soon       = timezone.now().date() + timedelta(days=EXPIRY_WINDOW_DAYS)
+    placements = _placements()
     areas = list(
         StorageArea.objects.prefetch_related(
-            Prefetch(
-                'locations',
-                queryset=StorageLocation.objects.prefetch_related(
-                    Prefetch('medicines', queryset=_active_meds_qs(), to_attr='active_meds')
-                ).order_by('code'),
-            )
+            Prefetch('locations', queryset=StorageLocation.objects.order_by('code'))
         )
     )
 
@@ -3066,24 +3324,25 @@ def storage_locations(request):
     for a in areas:
         locs = []
         for l in a.locations.all():
-            meds   = l.active_meds
-            alerts = sum(1 for m in meds if _stock_state(m) != 'ok')
+            pl       = placements.get(l.pk, {}) if l.kind == 'shelf' else {}
+            alerts   = sum(1 for e in pl.values() if _stock_state(e['med']) != 'ok')
+            expiring = sum(1 for e in pl.values() if e['expiry'] and e['expiry'] <= soon)
             if l.kind == 'shelf':
                 shelves += 1
-                total_meds += len(meds)
-                if meds:
+                total_meds += len(pl)
+                if pl:
                     used += 1
             locs.append({
                 'id': l.pk, 'code': l.code, 'name': l.name, 'kind': l.kind,
                 'x': l.x, 'y': l.y, 'w': l.w, 'h': l.h,
-                'notes': l.notes, 'count': len(meds), 'alert': alerts,
+                'notes': l.notes, 'count': len(pl), 'alert': alerts, 'expiring': expiring,
             })
         plan.append({
             'id': a.pk, 'name': a.name, 'description': a.description,
             'canvas_w': a.canvas_w, 'canvas_h': a.canvas_h, 'locations': locs,
         })
 
-    can_edit = can(request.user, 'storage_locations', 'edit')
+    can_edit  = can(request.user, 'storage_locations', 'edit')
     can_admin = is_admin(request.user)
 
     return render(request, 'floor_plan.html', {
@@ -3104,23 +3363,17 @@ def storage_locations(request):
     })
 
 
-# ── JSON: medicines inside one shelf ─────────────────────────────────────────
+# ── JSON: medicines inside one shelf (quantity = amount stored HERE) ─────────
 @require(('storage_locations', 'inventory'), ajax=True)
 def storage_location_medicines(request, pk):
     loc   = get_object_or_404(StorageLocation.objects.select_related('area'), pk=pk)
     today = timezone.now().date()
-    soon  = today + timedelta(days=90)
-    meds  = (
-        loc.medicines.filter(is_active=True)
-        .annotate(
-            total_qty=Sum('batches__quantity'),
-            next_expiry=Min('batches__expiry_date', filter=Q(batches__quantity__gt=0)),
-        )
-        .order_by('medicine_name')
-    )
+    soon  = today + timedelta(days=EXPIRY_WINDOW_DAYS)
+    pl    = _placements().get(loc.pk, {})
+
     rows = []
-    for m in meds:
-        exp = m.next_expiry
+    for e in sorted(pl.values(), key=lambda e: e['med'].medicine_name.lower()):
+        m, exp = e['med'], e['expiry']
         if not exp:
             exp_state = ''
         elif exp < today:
@@ -3133,7 +3386,7 @@ def storage_location_medicines(request, pk):
             'id': m.pk, 'name': m.medicine_name, 'generic': m.generic_name,
             'brand': m.brand_name, 'strength': m.strength,
             'form': m.get_dosage_form_display(),
-            'qty': m.total_qty or 0, 'status': _stock_state(m),
+            'qty': e['qty'], 'total': m.total_qty, 'status': _stock_state(m),
             'expiry': exp.strftime('%b %d, %Y') if exp else '', 'expiry_state': exp_state,
             's2': m.is_s2_regulated,
         })
@@ -3143,24 +3396,117 @@ def storage_location_medicines(request, pk):
     })
 
 
-# ── JSON: "where is this medicine?" ──────────────────────────────────────────
+# ── JSON: "where is this medicine?" (one result per location holding it) ─────
 @require(('storage_locations', 'inventory'), ajax=True)
 def storage_find_medicine(request):
     q = request.GET.get('q', '').strip()
     if len(q) < 2:
         return JsonResponse({'results': []})
-    qs = (
-        Medicine.objects.filter(is_active=True, location__isnull=False)
+    meds = list(
+        _live_meds_qs()
         .filter(Q(medicine_name__icontains=q) | Q(generic_name__icontains=q) |
                 Q(brand_name__icontains=q) | Q(barcode__icontains=q))
-        .select_related('location', 'location__area')
         .order_by('medicine_name')[:15]
     )
-    return JsonResponse({'results': [{
-        'name': m.medicine_name, 'strength': m.strength,
-        'loc_id': m.location_id, 'code': m.location.code,
-        'area_id': m.location.area_id, 'area': m.location.area.name,
-    } for m in qs]})
+    splits  = {m.pk: _med_split(m) for m in meds}
+    loc_ids = {lid for s in splits.values() for lid in s}
+    locs    = StorageLocation.objects.select_related('area').in_bulk(loc_ids)
+    results = []
+    for m in meds:
+        for lid, e in splits[m.pk].items():
+            loc = locs.get(lid)
+            if not loc:
+                continue
+            results.append({
+                'name': m.medicine_name, 'strength': m.strength, 'qty': e['qty'],
+                'loc_id': loc.pk, 'code': loc.code,
+                'area_id': loc.area_id, 'area': loc.area.name,
+            })
+    return JsonResponse({'results': results})
+
+
+# ── Transfer stock between locations (total never changes) ───────────────────
+@require('storage_locations', 'edit', ajax=True)
+@require_POST
+def storage_location_transfer(request):
+    try:
+        data   = json.loads(request.body or b'{}')
+        med_id = int(data['medicine_id'])
+        src_id = int(data['from_id'])
+        dst_id = int(data['to_id'])
+        qty    = int(data['quantity'])
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return JsonResponse({'ok': False, 'error': 'Invalid data.'}, status=400)
+    notes = str(data.get('notes', '') or '').strip()[:300]
+
+    if qty <= 0:
+        return JsonResponse({'ok': False, 'error': 'Quantity must be greater than zero.'}, status=400)
+    if src_id == dst_id:
+        return JsonResponse({'ok': False, 'error': 'Choose a different destination.'}, status=400)
+
+    with transaction.atomic():
+        med = get_object_or_404(Medicine.objects.select_for_update(), pk=med_id, is_active=True)
+        src = get_object_or_404(StorageLocation, pk=src_id)
+        dst = get_object_or_404(StorageLocation, pk=dst_id)
+        if src.kind != StorageLocation.KIND_SHELF or dst.kind != StorageLocation.KIND_SHELF:
+            return JsonResponse({'ok': False, 'error': 'Both locations must be storage locations.'}, status=400)
+
+        def at(loc):   # batches whose effective location is `loc`
+            return Q(location=loc) | Q(location__isnull=True, medicine__location=loc)
+
+        src_batches = list(
+            med.batches.select_for_update().filter(quantity__gt=0).filter(at(src))
+            .order_by(F('expiry_date').asc(nulls_last=True), 'received_at')
+        )
+        available = sum(b.quantity for b in src_batches)
+        if qty > available:
+            return JsonResponse({'ok': False,
+                'error': f'Only {available} unit(s) of "{med.medicine_name}" are stored in {src.code}.'}, status=400)
+
+        total = med.stock_quantity          # unchanged by a transfer
+        remaining = qty
+        for b in src_batches:               # FEFO: earliest expiry moves first
+            if remaining <= 0:
+                break
+            take = min(b.quantity, remaining)
+            dest = (med.batches.filter(batch_number=b.batch_number, expiry_date=b.expiry_date)
+                    .filter(at(dst)).exclude(pk=b.pk).first())
+            if dest:
+                dest.quantity += take
+                dest.save()
+            else:
+                dest = MedicineStock.objects.create(
+                    medicine=med, batch_number=b.batch_number, expiry_date=b.expiry_date,
+                    quantity=take, purchase_price=b.purchase_price, supplier=b.supplier,
+                    location=dst, created_by=request.user,
+                )
+                MedicineStock.objects.filter(pk=dest.pk).update(received_at=b.received_at)
+            b.quantity -= take
+            b.save()
+            remaining -= take
+
+            StockMovement.objects.create(
+                medicine=med, batch=dest, movement_type='transfer',
+                quantity=0, quantity_before=total, quantity_after=total,
+                batch_number=b.batch_number, expiry_date=b.expiry_date,
+                reference_no=f'TRF {src.code}>{dst.code}',
+                notes=f'Transferred {take} unit(s) from {src.code} to {dst.code}' + (f' — {notes}' if notes else ''),
+                performed_by=request.user,
+            )
+
+        # If nothing is left in the old main location, the main location follows the stock
+        left_at_src = available - qty
+        moved_primary = False
+        if med.location_id == src.pk and left_at_src == 0:
+            med.location = dst
+            med.save(update_fields=['location', 'updated_at'])
+            moved_primary = True
+
+    msg = f'Transferred {qty} unit(s) of "{med.medicine_name}" from {src.code} to {dst.code}. Total stock unchanged ({total}).'
+    if moved_primary:
+        msg += f' Main location is now {dst.code}.'
+    messages.success(request, msg)
+    return JsonResponse({'ok': True, 'moved': qty, 'total': total})
 
 
 # ── Areas ────────────────────────────────────────────────────────────────────
@@ -3205,7 +3551,7 @@ def storage_area_update(request, pk):
 @require_POST
 def storage_area_delete(request, pk):
     area = get_object_or_404(StorageArea, pk=pk)
-    if StorageLocation.objects.filter(area=area, medicines__is_active=True).exists():
+    if any(_loc_has_stock(l) for l in area.locations.all()):
         messages.error(request, f'Cannot remove "{area.name}" — medicines are still assigned to its '
                                 'locations. Reassign them first.')
         return redirect(_storage_url(area.pk))
@@ -3261,7 +3607,7 @@ def storage_location_update(request, pk):
     kind = request.POST.get('kind')
     if kind not in dict(StorageLocation.KIND_CHOICES):
         kind = loc.kind
-    if kind == StorageLocation.KIND_LANDMARK and loc.medicines.filter(is_active=True).exists():
+    if kind == StorageLocation.KIND_LANDMARK and _loc_has_stock(loc):
         messages.error(request, f'"{loc.code}" still holds medicines — reassign them before making it a landmark.')
         return redirect(_storage_url(loc.area_id))
 
@@ -3285,7 +3631,7 @@ def storage_location_update(request, pk):
 def storage_location_delete(request, pk):
     loc = get_object_or_404(StorageLocation, pk=pk)
     area_id, code = loc.area_id, loc.code
-    n = loc.medicines.filter(is_active=True).count()
+    n = len(_placements().get(loc.pk, {}))
     loc.delete()                       # Medicine.location is SET_NULL
     msg = f'Location "{code}" removed.'
     if n:
@@ -3334,3 +3680,469 @@ def storage_location_layout(request):
         canvas_saved += StorageArea.objects.filter(pk=area_id).update(canvas_w=cw, canvas_h=ch)
 
     return JsonResponse({'ok': True, 'saved': len(changed), 'canvases': canvas_saved})
+
+
+
+
+VALID_REASONS = dict(MedicineReturn.REASON_CHOICES)
+SOURCE_LABELS = dict(MedicineReturn.SOURCE_CHOICES)
+ 
+ 
+# ─────────────────────────────────────────────────────────────────────────────
+# helpers
+# ─────────────────────────────────────────────────────────────────────────────
+ 
+def _returned_so_far(dispensing_item):
+    return (MedicineReturnItem.objects
+            .filter(dispensing_item=dispensing_item)
+            .aggregate(t=Sum('quantity'))['t'] or 0)
+ 
+ 
+def _to_int_or_none(v):
+    try:
+        return int(v) if v not in (None, '') else None
+    except (ValueError, TypeError):
+        return None
+ 
+ 
+def _get_batch(medicine, batch_id):
+    """Validate a user-picked batch. None → automatic placement."""
+    batch_id = _to_int_or_none(batch_id)
+    if not batch_id:
+        return None
+    try:
+        return MedicineStock.objects.select_for_update().get(pk=batch_id, medicine=medicine)
+    except MedicineStock.DoesNotExist:
+        raise ValueError(
+            f'The selected batch does not belong to "{medicine.medicine_name}".')
+ 
+ 
+def _batches_payload(medicine_ids):
+    """{medicine_id: [batch dicts]} — in-stock batches first, then empty ones (max 25 each)."""
+    today = timezone.localdate()
+    out = {}
+    qs = (MedicineStock.objects.filter(medicine_id__in=medicine_ids)
+          .select_related('location')
+          .order_by('medicine_id', F('expiry_date').asc(nulls_last=True), 'received_at'))
+    for b in qs:
+        lst = out.setdefault(b.medicine_id, [])
+        lst.append({
+            'pk':           b.pk,
+            'batch_number': b.batch_number or '—',
+            'expiry':       b.expiry_date.strftime('%b %d, %Y') if b.expiry_date else 'No expiry',
+            'expired':      bool(b.expiry_date and b.expiry_date < today),
+            'quantity':     b.quantity,
+            'location':     b.location.code if b.location else '',
+        })
+    for mid, lst in out.items():
+        lst.sort(key=lambda x: x['quantity'] == 0)      # stable: in-stock first
+        out[mid] = lst[:25]
+    return out
+ 
+ 
+def _restock(medicine, qty, user, reference_no, notes,
+             dispensing_item=None, target_batch=None):
+    """
+    Put `qty` units back on the shelf and write 'return' stock movements.
+    Returns [(batch, units_placed), ...].
+ 
+    Priority:
+      1. target_batch  — the batch the user picked, gets everything.
+      2. the batches the units were originally dispensed from (traced via the
+         TXN-<id> 'out' movements), so expiry / cost stay correct.
+      3. anything left → a new batch with no expiry.
+    """
+    placed = []
+ 
+    def _add_to(batch, units, ref):
+        before = medicine.stock_quantity
+        batch.quantity += units
+        batch.save()
+        StockMovement.objects.create(
+            medicine=medicine, batch=batch, movement_type='return',
+            quantity=units, quantity_before=before,
+            quantity_after=medicine.stock_quantity,
+            batch_number=batch.batch_number, expiry_date=batch.expiry_date,
+            purchase_price=batch.purchase_price, supplier=batch.supplier,
+            reference_no=ref, notes=notes, performed_by=user,
+        )
+        placed.append((batch, units))
+ 
+    # 1) user-picked batch
+    if target_batch is not None:
+        _add_to(target_batch, qty, reference_no)
+        return placed
+ 
+    remaining = qty
+ 
+    # 2) original batches
+    if dispensing_item is not None:
+        txn_ref = f'TXN-{dispensing_item.dispensing_id}'
+        taken = {}
+        for mv in StockMovement.objects.filter(
+                medicine=medicine, movement_type='out',
+                reference_no=txn_ref, batch__isnull=False).order_by('id'):
+            taken[mv.batch_id] = taken.get(mv.batch_id, 0) + abs(mv.quantity)
+ 
+        put_back = {}
+        for mv in StockMovement.objects.filter(
+                medicine=medicine, movement_type='return',
+                reference_no=f'RET-{txn_ref}', batch__isnull=False):
+            put_back[mv.batch_id] = put_back.get(mv.batch_id, 0) + mv.quantity
+ 
+        for batch_id, took in taken.items():
+            if remaining <= 0:
+                break
+            room = took - put_back.get(batch_id, 0)
+            if room <= 0:
+                continue
+            give  = min(room, remaining)
+            batch = MedicineStock.objects.select_for_update().get(pk=batch_id)
+            _add_to(batch, give, f'RET-{txn_ref}')
+            remaining -= give
+ 
+    # 3) leftovers → new blank batch
+    if remaining > 0:
+        before = medicine.stock_quantity
+        batch = MedicineStock.objects.create(
+            medicine=medicine, quantity=remaining, created_by=user)
+        StockMovement.objects.create(
+            medicine=medicine, batch=batch, movement_type='return',
+            quantity=remaining, quantity_before=before,
+            quantity_after=medicine.stock_quantity,
+            reference_no=reference_no, notes=notes, performed_by=user,
+        )
+        placed.append((batch, remaining))
+ 
+    return placed
+ 
+ 
+def _record_items(ret, medicine, qty, dispensing_item, placed):
+    """One MedicineReturnItem per batch touched (or one batch-less row if not restocked)."""
+    if not placed:
+        MedicineReturnItem.objects.create(
+            medicine_return=ret, medicine=medicine,
+            dispensing_item=dispensing_item, quantity=qty)
+        return
+    for batch, units in placed:
+        MedicineReturnItem.objects.create(
+            medicine_return=ret, medicine=medicine, dispensing_item=dispensing_item,
+            quantity=units, batch=batch,
+            batch_number=batch.batch_number, expiry_date=batch.expiry_date)
+ 
+ 
+def _parse_body(request):
+    try:
+        return json.loads(request.body or b'{}')
+    except (ValueError, TypeError):
+        return None
+ 
+ 
+def _parse_iso(value, default):
+    try:
+        return date.fromisoformat(value)
+    except (ValueError, TypeError):
+        return default
+ 
+ 
+# ─────────────────────────────────────────────────────────────────────────────
+# PAGE
+# ─────────────────────────────────────────────────────────────────────────────
+ 
+@require('returns')
+def returns_view(request):
+    return render(request, 'returns.html', {
+        'reasons': MedicineReturn.REASON_CHOICES,
+        'sources': MedicineReturn.SOURCE_CHOICES,
+        'now':     timezone.localtime(timezone.now()),
+    })
+ 
+ 
+# ─────────────────────────────────────────────────────────────────────────────
+# Batches of one medicine (Tab 2 batch picker)
+# URL: /returns/medicine/<pk>/batches/
+# ─────────────────────────────────────────────────────────────────────────────
+ 
+@require('returns', ajax=True)
+@require_GET
+def return_medicine_batches(request, pk):
+    return JsonResponse({'batches': _batches_payload([pk]).get(pk, [])})
+ 
+ 
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 1 — patient's dispensed medicines (AJAX)
+# URL: /returns/patient/<hpatkey>/items/
+# ─────────────────────────────────────────────────────────────────────────────
+ 
+@require('returns', ajax=True)
+@require_GET
+def return_patient_items(request, hpatkey):
+    hpatkey = str(hpatkey).strip()
+ 
+    txns = Dispensing.objects.filter(ihomis_hpatkey=hpatkey)
+    if not txns.exists():
+        try:
+            hpercode = HPerson.objects.using('ihomis_plus').get(pk=hpatkey).hospital_number
+            txns = Dispensing.objects.filter(ihomis_hpercode=hpercode)
+        except Exception:
+            txns = Dispensing.objects.none()
+ 
+    items = list(DispensingItem.objects
+                 .filter(dispensing__in=txns)
+                 .select_related('medicine', 'dispensing', 'dispensing__doctor')
+                 .order_by('-dispensing__created_at', 'pk'))
+ 
+    returned_map = dict(
+        MedicineReturnItem.objects.filter(dispensing_item__in=items)
+        .values_list('dispensing_item')
+        .annotate(t=Sum('quantity'))
+    )
+ 
+    rows = []
+    for it in items:
+        returned = returned_map.get(it.pk, 0)
+        m, t     = it.medicine, it.dispensing
+        rows.append({
+            'item_pk':         it.pk,
+            'txn_pk':          t.pk,
+            'date':            timezone.localtime(t.created_at).strftime('%b %d, %Y'),
+            'time':            timezone.localtime(t.created_at).strftime('%I:%M %p'),
+            'prescription_no': t.prescription_no or '',
+            'doctor':          f'Dr. {t.doctor.get_full_name()}' if t.doctor else '',
+            'medicine_pk':     m.pk,
+            'name':            m.medicine_name,
+            'generic':         m.generic_name,
+            'strength':        m.strength,
+            'form':            m.get_dosage_form_display(),
+            'is_s2':           m.is_s2_regulated,
+            'dispensed':       it.quantity,
+            'returned':        returned,
+            'returnable':      max(it.quantity - returned, 0),
+            'unit_price':      float(it.unit_price),
+        })
+ 
+    return JsonResponse({'items': rows})
+ 
+ 
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 1 — submit return for a patient
+# ─────────────────────────────────────────────────────────────────────────────
+ 
+@require('returns', 'edit', ajax=True)
+@require_POST
+def return_patient_submit(request):
+    data = _parse_body(request)
+    if data is None:
+        return JsonResponse({'error': 'Invalid data.'}, status=400)
+
+    reason       = data.get('reason', '')
+    notes        = str(data.get('notes', '') or '').strip()
+    hpatkey      = str(data.get('ihomis_hpatkey', '') or '').strip()
+    hpercode     = str(data.get('ihomis_hpercode', '') or '').strip()
+    patient_name = str(data.get('patient_name', '') or '').strip()
+
+    if reason not in VALID_REASONS:
+        return JsonResponse({'error': 'Please select a reason for return.'}, status=400)
+    if not hpatkey:
+        return JsonResponse({'error': 'No patient selected.'}, status=400)
+
+    # item_pk -> quantity wanted (no batch choice: units go back to the batch they came from)
+    wanted = {}
+    try:
+        for row in data.get('items', []):
+            q = int(row.get('quantity', 0))
+            if q > 0:
+                pk = int(row['item_pk'])
+                wanted[pk] = wanted.get(pk, 0) + q
+    except (ValueError, TypeError, KeyError):
+        return JsonResponse({'error': 'Invalid items.'}, status=400)
+    if not wanted:
+        return JsonResponse({'error': 'Enter a quantity to return for at least one medicine.'}, status=400)
+
+    try:
+        with transaction.atomic():
+            lines = list(DispensingItem.objects.select_for_update()
+                         .filter(pk__in=wanted.keys()))
+            if len(lines) != len(wanted):
+                return JsonResponse({'error': 'Some dispensed items were not found.'}, status=400)
+
+            for it in lines:
+                txn = it.dispensing
+                if txn.ihomis_hpatkey != hpatkey and (not hpercode or txn.ihomis_hpercode != hpercode):
+                    return JsonResponse({'error': 'An item does not belong to this patient.'}, status=400)
+                avail = it.quantity - _returned_so_far(it)
+                if wanted[it.pk] > avail:
+                    return JsonResponse({
+                        'error': f'Cannot return {wanted[it.pk]} of "{it.medicine.medicine_name}" '
+                                 f'(Txn #{txn.pk}). Only {avail} still returnable.'
+                    }, status=400)
+
+            ret = MedicineReturn.objects.create(
+                source=MedicineReturn.SOURCE_PATIENT,
+                patient_name=patient_name, ihomis_hpatkey=hpatkey, ihomis_hpercode=hpercode,
+                reason=reason, notes=notes, restocked=True, processed_by=request.user,
+            )
+            total_units = 0
+            for it in lines:
+                qty    = wanted[it.pk]
+                placed = _restock(
+                    it.medicine, qty, request.user,
+                    reference_no=f'RET-{ret.pk}',
+                    notes=f'Return #{ret.pk} — {VALID_REASONS[reason]}'
+                          + (f' — {notes}' if notes else ''),
+                    dispensing_item=it,      # auto-return to the ORIGINAL batch(es)
+                )
+                _record_items(ret, it.medicine, qty, it, placed)
+                total_units += qty
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=400)
+
+    return JsonResponse({
+        'success': True, 'return_pk': ret.pk, 'units': total_units,
+        'message': f'Return #{ret.pk} recorded — {total_units} unit(s) returned to stock.',
+    })
+ 
+ 
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 2 — free-form "Log Returned Medicines"
+# ─────────────────────────────────────────────────────────────────────────────
+ 
+@require('returns', 'edit', ajax=True)
+@require_POST
+def return_log_submit(request):
+    data = _parse_body(request)
+    if data is None:
+        return JsonResponse({'error': 'Invalid data.'}, status=400)
+ 
+    reason       = data.get('reason', '')
+    notes        = str(data.get('notes', '') or '').strip()
+    patient_name = str(data.get('patient_name', '') or '').strip()
+    restock      = bool(data.get('restock', False))
+ 
+    if reason not in VALID_REASONS:
+        return JsonResponse({'error': 'Please select a reason for return.'}, status=400)
+ 
+    # key = (medicine_pk, batch_id or None) so two different batches stay separate
+    wanted = {}
+    try:
+        for row in data.get('items', []):
+            q = int(row.get('quantity', 0))
+            if q > 0:
+                key = (int(row['medicine_pk']),
+                       _to_int_or_none(row.get('batch_id')) if restock else None)
+                wanted[key] = wanted.get(key, 0) + q
+    except (ValueError, TypeError, KeyError):
+        return JsonResponse({'error': 'Invalid medicine lines.'}, status=400)
+    if not wanted:
+        return JsonResponse({'error': 'Add at least one medicine with a quantity.'}, status=400)
+ 
+    try:
+        with transaction.atomic():
+            med_ids = {k[0] for k in wanted}
+            meds = {m.pk: m for m in Medicine.objects.filter(pk__in=med_ids, is_active=True)}
+            if len(meds) != len(med_ids):
+                return JsonResponse({'error': 'A selected medicine was not found.'}, status=400)
+ 
+            ret = MedicineReturn.objects.create(
+                source=MedicineReturn.SOURCE_LOG, patient_name=patient_name,
+                reason=reason, notes=notes, restocked=restock,
+                processed_by=request.user,
+            )
+            for (mpk, batch_id), qty in wanted.items():
+                med = meds[mpk]
+                placed = []
+                if restock:
+                    placed = _restock(
+                        med, qty, request.user,
+                        reference_no=f'RET-{ret.pk}',
+                        notes=f'Return Log #{ret.pk} — {VALID_REASONS[reason]}'
+                              + (f' — {patient_name}' if patient_name else '')
+                              + (f' — {notes}' if notes else ''),
+                        target_batch=_get_batch(med, batch_id),
+                    )
+                _record_items(ret, med, qty, None, placed)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=400)
+ 
+    units = sum(wanted.values())
+    return JsonResponse({
+        'success': True, 'return_pk': ret.pk, 'units': units,
+        'message': f'Return log #{ret.pk} saved — {len(med_ids)} medicine(s), {units} unit(s)'
+                   + (' added back to stock.' if restock else '.'),
+    })
+ 
+ 
+# ─────────────────────────────────────────────────────────────────────────────
+# REPORT — every returned medicine (JSON for the on-screen table + print)
+# URL: /returns/report/data/?date_from=&date_to=&reason=&source=&q=
+# ─────────────────────────────────────────────────────────────────────────────
+ 
+@require('returns', ajax=True)
+@require_GET
+def returns_report_data(request):
+    today     = timezone.localdate()
+    date_from = _parse_iso(request.GET.get('date_from'), today.replace(day=1))
+    date_to   = _parse_iso(request.GET.get('date_to'), today)
+    reason    = request.GET.get('reason', '')
+    source    = request.GET.get('source', '')
+    q         = request.GET.get('q', '').strip()
+ 
+    qs = (MedicineReturnItem.objects
+          .filter(medicine_return__returned_at__date__gte=date_from,
+                  medicine_return__returned_at__date__lte=date_to)
+          .select_related('medicine', 'medicine_return', 'medicine_return__processed_by'))
+    if reason in VALID_REASONS:
+        qs = qs.filter(medicine_return__reason=reason)
+    if source in SOURCE_LABELS:
+        qs = qs.filter(medicine_return__source=source)
+    if q:
+        qs = qs.filter(
+            Q(medicine_return__patient_name__icontains=q) |
+            Q(medicine_return__ihomis_hpercode__icontains=q) |
+            Q(medicine__medicine_name__icontains=q) |
+            Q(medicine__generic_name__icontains=q) |
+            Q(batch_number__icontains=q))
+    qs = qs.order_by('-medicine_return__returned_at', 'pk')
+ 
+    total_units    = qs.aggregate(t=Sum('quantity'))['t'] or 0
+    restocked_units = qs.filter(medicine_return__restocked=True).aggregate(t=Sum('quantity'))['t'] or 0
+    return_count   = qs.values('medicine_return').distinct().count()
+    line_count     = qs.count()
+ 
+    LIMIT = 3000
+    rows = []
+    for it in qs[:LIMIT]:
+        r, m = it.medicine_return, it.medicine
+        when = timezone.localtime(r.returned_at)
+        by   = r.processed_by
+        rows.append({
+            'return_pk':    r.pk,
+            'date':         when.strftime('%b %d, %Y'),
+            'time':         when.strftime('%I:%M %p'),
+            'source':       SOURCE_LABELS.get(r.source, r.source),
+            'patient_name': r.patient_name or '—',
+            'hn':           r.ihomis_hpercode or '',
+            'medicine':     m.medicine_name,
+            'generic':      m.generic_name,
+            'strength':     m.strength,
+            'form':         m.get_dosage_form_display(),
+            'batch_number': it.batch_number or ('—' if r.restocked else 'Not restocked'),
+            'expiry':       it.expiry_date.strftime('%b %d, %Y') if it.expiry_date else '—',
+            'quantity':     it.quantity,
+            'reason':       VALID_REASONS.get(r.reason, r.reason),
+            'restocked':    r.restocked,
+            'by':           (by.get_full_name() or by.username) if by else '—',
+            'notes':        r.notes or '',
+        })
+ 
+    return JsonResponse({
+        'rows': rows,
+        'truncated': line_count > LIMIT,
+        'totals': {
+            'returns': return_count, 'lines': line_count,
+            'units': total_units, 'restocked_units': restocked_units,
+        },
+        'filters': {
+            'date_from': date_from.isoformat(), 'date_to': date_to.isoformat(),
+        },
+    })

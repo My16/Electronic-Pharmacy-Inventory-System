@@ -67,6 +67,15 @@ urlpatterns = [
     path('storage/locations/layout/',          views.storage_location_layout,  name='storage_location_layout'),
     path('storage/locations/<int:pk>/medicines/', views.storage_location_medicines, name='storage_location_medicines'),
     path('storage/find/',                      views.storage_find_medicine,    name='storage_find'),
+    path('storage/transfer/', views.storage_location_transfer, name='storage_location_transfer'),
+
+    # ── Returns ───────────────────────────────────────────────────────────────
+    path('returns/',                              views.returns_view,            name='returns'),
+    path('returns/patient/<str:hpatkey>/items/',  views.return_patient_items,    name='return_patient_items'),
+    path('returns/patient/submit/',               views.return_patient_submit,   name='return_patient_submit'),
+    path('returns/log/submit/',                   views.return_log_submit,       name='return_log_submit'),
+    path('returns/medicine/<int:pk>/batches/',    views.return_medicine_batches, name='return_medicine_batches'),
+    path('returns/report/data/',                  views.returns_report_data,     name='returns_report_data'),
 
     # ── User Management ───────────────────────────────────────────────────────
     path('users/',                   views.user_management_view,    name='user_management'),
