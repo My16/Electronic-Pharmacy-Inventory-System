@@ -14,7 +14,7 @@ from django.db.models.functions import TruncDay, TruncWeek, TruncMonth
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from .models import (
     UserProfile, UserPermission, Medicine, MedicineCategory, MedicineStock,
-    Supplier, StockMovement, Dispensing, DispensingItem, Doctor
+    Supplier, StockMovement, Dispensing, DispensingItem, Doctor, Ward
 )
 import json
 import io
@@ -84,6 +84,12 @@ from .models import (
 from .ihomis_models import HPerson
 from .permissions import require
 
+from django.db.models import Max
+import re
+import math
+from xml.sax.saxutils import escape as _xml_escape
+
+
 
 def _deduct_fefo(medicine, qty_needed, performed_by,
                  movement_type='out', dispensed_to='',
@@ -140,6 +146,16 @@ def _deduct_fefo(medicine, qty_needed, performed_by,
         remaining -= take
 
     return True
+
+
+def _next_requisition(ward, year, half):
+    """Next In Patient requisition for this ward + year + half → (seq, '0001/WARD/2026')."""
+    last = (Dispensing.objects
+            .filter(patient_type='in', ward=ward,
+                    requisition_year=year, requisition_half=half)
+            .aggregate(m=Max('requisition_seq'))['m'] or 0)
+    seq = last + 1
+    return seq, f'{seq:04d}/{ward.requisition_label}/{year}'
 
 
 def _parse_date_range(request, default_days=30):
@@ -1052,6 +1068,10 @@ def supplier_add_view(request):
             phone        = request.POST.get('phone', '').strip(),
             email        = request.POST.get('email', '').strip(),
             address      = request.POST.get('address', '').strip(),
+            pdea_permit_no     = request.POST.get('pdea_permit_no', '').strip(),
+            pdea_permit_expiry = request.POST.get('pdea_permit_expiry', '').strip() or None,
+            s4_license_no      = request.POST.get('s4_license_no', '').strip(),
+            s4_license_expiry  = request.POST.get('s4_license_expiry', '').strip() or None,
             notes        = request.POST.get('notes', '').strip(),
         )
         messages.success(request, f'Supplier "{name}" added successfully.')
@@ -1074,6 +1094,10 @@ def supplier_edit_view(request, pk):
         supplier.phone        = request.POST.get('phone', '').strip()
         supplier.email        = request.POST.get('email', '').strip()
         supplier.address      = request.POST.get('address', '').strip()
+        supplier.pdea_permit_no     = request.POST.get('pdea_permit_no', '').strip()
+        supplier.pdea_permit_expiry = request.POST.get('pdea_permit_expiry', '').strip() or None
+        supplier.s4_license_no      = request.POST.get('s4_license_no', '').strip()
+        supplier.s4_license_expiry  = request.POST.get('s4_license_expiry', '').strip() or None
         supplier.notes        = request.POST.get('notes', '').strip()
         supplier.is_active    = request.POST.get('is_active', 'true') == 'true'
         supplier.save()
@@ -1132,6 +1156,12 @@ def supplier_detail_view(request, pk):
         'phone':            supplier.phone,
         'email':            supplier.email,
         'address':          supplier.address,
+        'pdea_permit_no':     supplier.pdea_permit_no,
+        'pdea_permit_expiry': supplier.pdea_permit_expiry.strftime('%b %d, %Y') if supplier.pdea_permit_expiry else '',
+        'pdea_status':        supplier.pdea_status,
+        's4_license_no':      supplier.s4_license_no,
+        's4_license_expiry':  supplier.s4_license_expiry.strftime('%b %d, %Y') if supplier.s4_license_expiry else '',
+        's4_status':          supplier.s4_status,
         'notes':            supplier.notes,
         'is_active':        supplier.is_active,
         'medicines':        medicines,
@@ -2565,6 +2595,489 @@ def consumption_report(request):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# PDEA S2 REGISTER  (printable "PDEA S Register 2-14" ledger, one medicine)
+# ─────────────────────────────────────────────────────────────────────────────
+
+REGISTER_UNITS = {
+    'injection': 'AMP.', 'tablet': 'TAB.', 'capsule': 'CAP.', 'syrup': 'BTL.',
+    'suspension': 'BTL.', 'drops': 'BTL.', 'cream': 'TUBE', 'ointment': 'TUBE',
+    'inhaler': 'PC.', 'patch': 'PC.', 'suppository': 'PC.', 'powder': 'SACHET',
+}
+REGISTER_MOVE_LABELS = {
+    'in': 'RECEIVED', 'return': 'RETURNED', 'adjust': 'ADJUSTMENT',
+    'audit': 'AUDIT ADJ.', 'out': 'STOCK OUT', 'expired': 'EXPIRED', 'damaged': 'DAMAGED',
+}
+
+
+def _formatted_user_name(user):
+    first  = (user.first_name or '').upper()
+    last   = (user.last_name or '').upper()
+    middle = getattr(getattr(user, 'profile', None), 'middle_name', '') or ''
+    mi     = f'{middle[0].upper()}.' if middle else ''
+    return ' '.join(p for p in (first, mi, last) if p) or user.username.upper()
+
+
+def _register_supplier_lines(supplier):
+    if not supplier:
+        return []
+    lines = [supplier.name.upper()]
+    if supplier.address:
+        lines.append(' '.join(supplier.address.split()))
+    if supplier.pdea_permit_no:
+        exp = supplier.pdea_permit_expiry.strftime('%m/%d/%Y') if supplier.pdea_permit_expiry else '—'
+        lines.append(f'PDEA Permit No. {supplier.pdea_permit_no} (exp. {exp})')
+    if supplier.s4_license_no:
+        exp = supplier.s4_license_expiry.strftime('%m/%d/%Y') if supplier.s4_license_expiry else '—'
+        lines.append(f'S4 License No. {supplier.s4_license_no} (exp. {exp})')
+    return lines
+
+def _pdea_register_build(med, date_from, date_to, rows_per_page, start_page):
+    """Builds the register (pages + totals) for ONE medicine."""
+    unit     = REGISTER_UNITS.get(med.dosage_form, 'PC.')
+    start_dt = timezone.make_aware(datetime.combine(date_from, datetime.min.time()))
+    prev     = (StockMovement.objects.filter(medicine=med, created_at__lt=start_dt)
+                .order_by('-created_at', '-id').first())
+    opening  = prev.quantity_after if prev else 0
+
+    events = []
+
+    # ── OUT: dispensing records (patient / ward, requisition, practitioner) ──
+    items = (DispensingItem.objects
+             .filter(medicine=med,
+                     dispensing__created_at__date__gte=date_from,
+                     dispensing__created_at__date__lte=date_to)
+             .select_related('dispensing', 'dispensing__doctor', 'dispensing__ward'))
+    for it in items:
+        d, doc = it.dispensing, it.dispensing.doctor
+        if d.patient_type == 'in':
+            who = f'{d.ward.name.upper()} USED' if d.ward else 'IN-PATIENT USED'
+        else:
+            name = (d.customer_name or '').strip().upper()
+            who  = f'{name} - OPD' if d.patient_type == 'out' and name else name
+        practitioner = ''
+        if doc:
+            practitioner = f'DR. {doc.get_full_name().upper()}'
+            if doc.specialization:
+                practitioner += f' - {doc.specialization.upper()}'
+        events.append({
+            'dt': d.created_at, 'kind': 'out', 'qty': it.quantity,
+            'patient': who, 'req': d.requisition_no or d.prescription_no,
+            's2': doc.s2_license_no if doc else '', 'practitioner': practitioner,
+            'remarks': {'in': 'IN-PATIENT', 'out': 'OUT-PATIENT'}.get(d.patient_type, ''),
+        })
+
+    # ── Other stock changes (receipts, returns, expired, adjustments …) ─────
+    moves = (StockMovement.objects
+             .filter(medicine=med,
+                     created_at__date__gte=date_from, created_at__date__lte=date_to)
+             .exclude(movement_type='transfer')
+             .select_related('supplier'))
+    grouped = {}
+    for m in moves:
+        if m.movement_type == 'out' and m.reference_no.startswith('TXN-'):
+            continue                      # already listed from the dispensing record
+        key = (m.movement_type, m.reference_no, m.notes, m.supplier_id,
+               m.created_at.replace(microsecond=0))
+        g = grouped.setdefault(key, {'m': m, 'qty': 0})
+        g['qty'] += m.quantity
+    for g in grouped.values():
+        m, qty = g['m'], g['qty']
+        if qty == 0:
+            continue
+        label = REGISTER_MOVE_LABELS.get(m.movement_type, m.movement_type.upper())
+        if qty > 0:
+            lines = _register_supplier_lines(m.supplier) if m.movement_type == 'in' else []
+            if not lines:
+                lines = [label]
+            if m.reference_no:
+                lines.append(f'Ref: {m.reference_no}')
+            if m.notes and m.movement_type != 'in':
+                lines.append(m.notes)
+            events.append({'dt': m.created_at, 'kind': 'in', 'qty': qty,
+                           'info_lines': lines, 'remarks': label})
+        else:
+            events.append({
+                'dt': m.created_at, 'kind': 'out', 'qty': abs(qty),
+                'patient': ' — '.join(p for p in (label, m.dispensed_to, m.notes) if p),
+                'req': m.prescription_no or m.reference_no,
+                's2': '', 'practitioner': '', 'remarks': label,
+            })
+
+    # ── Running balance ──────────────────────────────────────────────────────
+    events.sort(key=lambda e: e['dt'])
+    bal = opening
+    for e in events:
+        bal += e['qty'] if e['kind'] == 'in' else -e['qty']
+        e['balance'] = bal
+        e['date']    = timezone.localtime(e['dt']).strftime('%m/%d/%Y')
+
+    # ── Split into printed pages (each page carries its own balance forwarded)
+    chunks = [events[i:i + rows_per_page] for i in range(0, len(events), rows_per_page)] or [[]]
+    pages, carry = [], opening
+    for n, chunk in enumerate(chunks):
+        pages.append({
+            'number': start_page + n, 'forwarded': carry, 'rows': chunk,
+            'blank_rows': range(rows_per_page - len(chunk)),
+        })
+        if chunk:
+            carry = chunk[-1]['balance']
+
+    return {
+        'med': med, 'unit': unit, 'pages': pages,
+        'opening': opening, 'closing': bal,
+        'total_in':  sum(e['qty'] for e in events if e['kind'] == 'in'),
+        'total_out': sum(e['qty'] for e in events if e['kind'] == 'out'),
+        'has_events': bool(events),
+    }
+
+
+def _pdea_register_context(request):
+    """Filters + registers, shared by the page, the PDF and the Excel export."""
+    today   = timezone.localdate()
+    s2_meds = Medicine.objects.filter(is_active=True, is_s2_regulated=True).order_by('medicine_name')
+
+    date_from = _parse_iso(request.GET.get('date_from'), today.replace(day=1))
+    date_to   = _parse_iso(request.GET.get('date_to'), today)
+    if date_to < date_from:
+        date_from, date_to = date_to, date_from
+
+    rows_options = (10, 15, 20, 25, 30)
+    try:
+        rows_per_page = int(request.GET.get('rows', 15))
+    except (TypeError, ValueError):
+        rows_per_page = 15
+    if rows_per_page not in rows_options:
+        rows_per_page = 15
+    try:
+        start_page = max(int(request.GET.get('start_page', 1)), 1)
+    except (TypeError, ValueError):
+        start_page = 1
+
+    med_id  = _to_int(request.GET.get('medicine'))
+    single  = s2_meds.filter(pk=med_id).first() if med_id else None
+    targets = [single] if single else list(s2_meds)
+
+    registers = []
+    for m in targets:
+        reg = _pdea_register_build(m, date_from, date_to, rows_per_page, start_page)
+        if not single and not reg['has_events'] and reg['opening'] == 0:
+            continue
+        registers.append(reg)
+
+    return {
+        's2_meds': s2_meds, 'registers': registers,
+        'selected': single.pk if single else None,
+        'date_from': date_from, 'date_to': date_to,
+        'rows_per_page': rows_per_page, 'rows_options': rows_options,
+        'start_page': start_page,
+        'pharmacist': request.GET.get('pharmacist', '').strip() or _formatted_user_name(request.user),
+    }
+
+
+@require('pdea_register')
+def pdea_register_report(request):
+    return render(request, 'pdea_register.html', _pdea_register_context(request))
+
+
+def _pdea_register_filename(ctx, ext):
+    regs = ctx['registers']
+    tag  = re.sub(r'[^A-Za-z0-9]+', '_', regs[0]['med'].generic_name).strip('_') \
+           if ctx['selected'] and regs else 'ALL'
+    return f"PDEA_S2_Register_{tag}_{ctx['date_from']}_{ctx['date_to']}.{ext}"
+
+
+# ── PDF ──────────────────────────────────────────────────────────────────────
+@require('pdea_register')
+def pdea_register_export_pdf(request):
+    if not REPORTLAB_AVAILABLE:
+        messages.error(request, 'reportlab is not installed. Run: pip install reportlab')
+        return redirect('pdea_register')
+    from reportlab.platypus import PageBreak
+
+    ctx = _pdea_register_context(request)
+    if not ctx['registers']:
+        messages.error(request, 'No S2 register data to export for these filters.')
+        return redirect('pdea_register')
+
+    FOLIO   = (8.5 * inch, 13 * inch)
+    page_sz = landscape(FOLIO)                       # 13 x 8.5 in
+    margin  = 0.4 * inch
+    avail_w = page_sz[0] - 2 * margin
+    black   = colors.black
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=page_sz, leftMargin=margin, rightMargin=margin,
+                            topMargin=margin, bottomMargin=margin,
+                            title='PDEA S2 Register', author='MHARSMC ePIS')
+
+    styles = getSampleStyleSheet()
+    base   = ParagraphStyle('rb', parent=styles['Normal'], fontName='Helvetica', fontSize=7.5, leading=9)
+    cell_c = ParagraphStyle('rc', parent=base, alignment=TA_CENTER)
+    cell_b = ParagraphStyle('rcb', parent=base, alignment=TA_CENTER, fontName='Helvetica-Bold')
+    head   = ParagraphStyle('rh', parent=base, alignment=TA_CENTER, fontName='Helvetica-Bold', fontSize=6.8, leading=8)
+    grp    = ParagraphStyle('rg', parent=head, fontSize=10, leading=12)
+    t_box  = ParagraphStyle('rt', parent=base, fontSize=9, leading=11)
+    r9     = ParagraphStyle('r9', parent=base, fontSize=9, leading=11, alignment=TA_RIGHT)
+    r9b    = ParagraphStyle('r9b', parent=r9, fontName='Helvetica-Bold')
+    medst  = ParagraphStyle('rm', parent=base, fontName='Helvetica-Bold', fontSize=12, leading=14)
+    c10b   = ParagraphStyle('c10', parent=base, fontName='Helvetica-Bold', fontSize=10, leading=12, alignment=TA_CENTER)
+    c8     = ParagraphStyle('c8', parent=base, fontSize=8, leading=10, alignment=TA_CENTER)
+
+    def P(text, style=cell_c):
+        return Paragraph(_xml_escape(str(text)).replace('\n', '<br/>'), style)
+
+    fr    = [6, 16, 6, 6, 14, 9, 10, 14, 6, 7, 6]       # column widths in %
+    col_w = [avail_w * f / 100 for f in fr]
+    head_labels = [
+        'Date<br/>Received',
+        'Supplier Information:<br/>Name, address, PDEA license no./ Local Permit No. and date issued',
+        'Quantity<br/>Received',
+        'Date<br/>Dispensed',
+        'Patient Information: Name, age, ward<br/>or<br/>Ward Information: Name of Ward, Receiving nurse',
+        'Rx/Order No.<br/>or<br/>Requisition No.',
+        'S2<br/>license<br/>No.',
+        'Practitioner Information:<br/>Name, Department',
+        'Quantity<br/>Dispensed', 'Balance', 'Remarks',
+    ]
+
+    story, first = [], True
+    for reg in ctx['registers']:
+        med, unit = reg['med'], reg['unit']
+        for pg in reg['pages']:
+            if not first:
+                story.append(PageBreak())
+            first = False
+
+            # ── top: title box + page no ──
+            top = Table([[Paragraph('<b>PDEA S Register 2-14</b><br/>( Records required of a hospital pharmacy)', t_box),
+                          Paragraph(f'Page No. {pg["number"]}', r9)]],
+                        colWidths=[3.3 * inch, avail_w - 3.3 * inch])
+            top.setStyle(TableStyle([('BOX', (0, 0), (0, 0), 0.8, black),
+                                     ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+                                     ('LEFTPADDING', (0, 0), (-1, -1), 4), ('RIGHTPADDING', (0, 0), (-1, -1), 4)]))
+            story += [top, Spacer(1, 6)]
+
+            # ── medicine + balance forwarded ──
+            meta = Table([[Paragraph(_xml_escape(f'{med.generic_name.upper()} {med.strength} {unit.lower()}'), medst),
+                           Paragraph('Initial Stock / Balance Forwarded', r9b),
+                           P(f'{pg["forwarded"]:,} {unit}', cell_b)]],
+                         colWidths=[avail_w - 4.9 * inch, 3.2 * inch, 1.7 * inch])
+            meta.setStyle(TableStyle([('BOX', (2, 0), (2, 0), 0.8, black),
+                                      ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                                      ('TOPPADDING', (2, 0), (2, 0), 4), ('BOTTOMPADDING', (2, 0), (2, 0), 4)]))
+            story += [meta, Spacer(1, 4)]
+
+            # ── ledger table ──
+            data = [[P('IN', grp), '', ''] + [P('OUT', grp)] + [''] * 7,
+                    [Paragraph(h, head) for h in head_labels]]
+            for rw in pg['rows']:
+                if rw['kind'] == 'in':
+                    data.append([P(rw['date']), P('\n'.join(rw['info_lines']), ParagraphStyle('l', parent=base)),
+                                 P(f'{rw["qty"]:,} {unit}', cell_b), '', '', '', '', '', '',
+                                 P(f'{rw["balance"]:,} {unit}', cell_b), P(rw['remarks'])])
+                else:
+                    data.append(['', '', '', P(rw['date']), P(rw['patient']), P(rw['req']), P(rw['s2']),
+                                 P(rw['practitioner']), P(f'{rw["qty"]:,} {unit}', cell_b),
+                                 P(f'{rw["balance"]:,} {unit}', cell_b), P(rw['remarks'])])
+            blanks = len(pg['blank_rows'])
+            for _ in range(blanks):
+                data.append([''] * 11)
+
+            heights = [None, None] + [None] * len(pg['rows']) + [0.2 * inch] * blanks
+            tbl = Table(data, colWidths=col_w, rowHeights=heights, repeatRows=2)
+            tbl.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.6, black),
+                ('SPAN', (0, 0), (2, 0)), ('SPAN', (3, 0), (10, 0)),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                ('LEFTPADDING', (0, 0), (-1, -1), 3), ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+            ]))
+            story.append(tbl)
+
+            # ── signature ──
+            story += [
+                Spacer(1, 0.22 * inch),
+                Paragraph(f'<b>{_xml_escape(ctx["pharmacist"])}</b>', c10b),
+                HRFlowable(width='32%', thickness=0.8, color=black, hAlign='CENTER', spaceBefore=1, spaceAfter=2),
+                Paragraph('SIGNATURE OVER PRINTED NAME OF AUTHORIZED PHARMACIST', c8),
+            ]
+
+    doc.build(story)
+    resp = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    resp['Content-Disposition'] = f'attachment; filename="{_pdea_register_filename(ctx, "pdf")}"'
+    return resp
+
+
+# ── Excel ────────────────────────────────────────────────────────────────────
+def _xl_merge(ws, r1, c1, r2, c2, value='', font=None, align=None, border=None):
+    if (r1, c1) != (r2, c2):
+        ws.merge_cells(start_row=r1, start_column=c1, end_row=r2, end_column=c2)
+    cell = ws.cell(r1, c1, value)
+    if font:
+        cell.font = font
+    if align:
+        cell.alignment = align
+    if border:
+        for rr in range(r1, r2 + 1):
+            for cc in range(c1, c2 + 1):
+                ws.cell(rr, cc).border = border
+    return cell
+
+
+def _xl_lines(text, width):
+    if not text:
+        return 1
+    return sum(max(1, math.ceil(len(p) / max(width - 1, 1))) for p in str(text).split('\n'))
+
+
+def _xl_sheet_title(med, used):
+    base  = re.sub(r'[\[\]:*?/\\]', '', f'{med.generic_name} {med.strength}').strip()[:28] or 'Register'
+    title, n = base, 2
+    while title in used:
+        title = f'{base[:25]}-{n}'
+        n += 1
+    used.add(title)
+    return title
+
+
+@require('pdea_register')
+def pdea_register_export_excel(request):
+    if not OPENPYXL_AVAILABLE:
+        messages.error(request, 'openpyxl is not installed. Run: pip install openpyxl')
+        return redirect('pdea_register')
+    from openpyxl.worksheet.pagebreak import Break
+    from openpyxl.worksheet.properties import PageSetupProperties
+
+    ctx = _pdea_register_context(request)
+    registers = ctx['registers']
+    if not registers:
+        messages.error(request, 'No S2 register data to export for these filters.')
+        return redirect('pdea_register')
+
+    thin   = Side(style='thin', color='000000')
+    box    = Border(left=thin, right=thin, top=thin, bottom=thin)
+    f_norm = Font(name='Arial', size=9)
+    f_bold = Font(name='Arial', size=9, bold=True)
+    f_head = Font(name='Arial', size=8, bold=True)
+    f_med  = Font(name='Arial', size=13, bold=True)
+    f_grp  = Font(name='Arial', size=11, bold=True)
+    ctr    = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    lft    = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    rgt    = Alignment(horizontal='right', vertical='center')
+    widths = [11, 38, 11, 11, 30, 18, 16, 32, 11, 11, 14]
+    head_labels = [
+        'Date\nReceived',
+        'Supplier Information:\nName, address, PDEA license no./ Local Permit No. and date issued',
+        'Quantity\nReceived', 'Date\nDispensed',
+        'Patient Information: Name, age, ward\nor\nWard Information: Name of Ward, Receiving nurse',
+        'Rx/Order No.\nor\nRequisition No.', 'S2\nlicense\nNo.',
+        'Practitioner Information:\nName, Department',
+        'Quantity\nDispensed', 'Balance', 'Remarks',
+    ]
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    # ── Summary sheet (only when exporting several medicines) ────────────────
+    if len(registers) > 1:
+        ws = wb.create_sheet('Summary')
+        ws.append(['MHARSMC — PDEA S2 Register Summary'])
+        ws['A1'].font = Font(name='Arial', size=13, bold=True)
+        ws.append([f'{ctx["date_from"]} to {ctx["date_to"]}'])
+        ws.append([])
+        ws.append(['Medicine', 'Balance Forwarded', 'Received', 'Dispensed / Removed', 'Closing Balance', 'Pages'])
+        for c in ws[4]:
+            c.font = Font(name='Arial', size=10, bold=True, color='FFFFFF')
+            c.fill = PatternFill('solid', fgColor='00ADB5')
+            c.alignment = ctr
+        for reg in registers:
+            ws.append([f'{reg["med"].generic_name} {reg["med"].strength}', reg['opening'],
+                       reg['total_in'], reg['total_out'], reg['closing'], len(reg['pages'])])
+        for i, w in enumerate([42, 18, 12, 20, 16, 8], 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+
+    # ── One worksheet per medicine ───────────────────────────────────────────
+    used = {'Summary'}
+    for reg in registers:
+        med, unit = reg['med'], reg['unit']
+        ws = wb.create_sheet(_xl_sheet_title(med, used))
+        for i, w in enumerate(widths, 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+        ws.page_setup.orientation = 'landscape'
+        ws.page_setup.paperSize   = 14            # Folio 8.5 x 13 in
+        ws.page_setup.fitToWidth  = 1
+        ws.page_setup.fitToHeight = 0
+        ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+        ws.page_margins.left = ws.page_margins.right = 0.4
+        ws.page_margins.top  = ws.page_margins.bottom = 0.4
+
+        r = 1
+        for pg in reg['pages']:
+            # title box + page no
+            _xl_merge(ws, r, 1, r + 1, 3,
+                      'PDEA S Register 2-14\n( Records required of a hospital pharmacy)', f_bold, lft, box)
+            _xl_merge(ws, r, 10, r, 11, f'Page No. {pg["number"]}', f_bold, rgt)
+            ws.row_dimensions[r].height = 16
+            ws.row_dimensions[r + 1].height = 16
+            r += 3
+
+            # medicine + balance forwarded
+            _xl_merge(ws, r, 1, r, 5, f'{med.generic_name.upper()} {med.strength} {unit.lower()}', f_med, lft)
+            _xl_merge(ws, r, 6, r, 9, 'Initial Stock / Balance Forwarded', f_bold, rgt)
+            _xl_merge(ws, r, 10, r, 11, f'{pg["forwarded"]:,} {unit}', f_bold, ctr, box)
+            ws.row_dimensions[r].height = 22
+            r += 2
+
+            # header rows
+            _xl_merge(ws, r, 1, r, 3, 'IN', f_grp, ctr, box)
+            _xl_merge(ws, r, 4, r, 11, 'OUT', f_grp, ctr, box)
+            r += 1
+            for i, label in enumerate(head_labels, 1):
+                c = ws.cell(r, i, label)
+                c.font, c.alignment, c.border = f_head, ctr, box
+            ws.row_dimensions[r].height = 62
+            r += 1
+
+            # data rows
+            for rw in pg['rows']:
+                if rw['kind'] == 'in':
+                    vals = [rw['date'], '\n'.join(rw['info_lines']), f'{rw["qty"]:,} {unit}',
+                            '', '', '', '', '', '', f'{rw["balance"]:,} {unit}', rw['remarks']]
+                else:
+                    vals = ['', '', '', rw['date'], rw['patient'], rw['req'], rw['s2'], rw['practitioner'],
+                            f'{rw["qty"]:,} {unit}', f'{rw["balance"]:,} {unit}', rw['remarks']]
+                lines = 1
+                for i, v in enumerate(vals, 1):
+                    c = ws.cell(r, i, v)
+                    c.font, c.border = f_norm, box
+                    c.alignment = lft if i in (2,) else ctr
+                    lines = max(lines, _xl_lines(v, widths[i - 1]))
+                ws.row_dimensions[r].height = max(16, 12.5 * lines + 4)
+                r += 1
+            for _ in pg['blank_rows']:
+                for i in range(1, 12):
+                    ws.cell(r, i).border = box
+                ws.row_dimensions[r].height = 17
+                r += 1
+
+            # signature
+            r += 1
+            _xl_merge(ws, r, 4, r, 8, ctx['pharmacist'], Font(name='Arial', size=10, bold=True), ctr,
+                      Border(bottom=thin))
+            r += 1
+            _xl_merge(ws, r, 4, r, 8, 'SIGNATURE OVER PRINTED NAME OF AUTHORIZED PHARMACIST',
+                      Font(name='Arial', size=8), ctr)
+            ws.row_breaks.append(Break(id=r))          # next register page starts on a new sheet
+            r += 2
+
+    resp = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    resp['Content-Disposition'] = f'attachment; filename="{_pdea_register_filename(ctx, "xlsx")}"'
+    wb.save(resp)
+    return resp
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # DISPENSING
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -2598,6 +3111,7 @@ def dispensing_view(request):
         'transactions':  page_obj.object_list,
         'page_obj':      page_obj,
         'paginator':     paginator,
+        'wards':         Ward.objects.filter(is_active=True),
     }
     return render(request, 'dispensing.html', context)
 
@@ -2693,6 +3207,33 @@ def dispensing_create(request):
                 return JsonResponse({'error': reason}, status=400)
         # ─────────────────────────────────────────────────────────────────────
 
+        # ── S2: patient type + requisition number ─────────────────────────────
+        patient_type = ''
+        ward = None
+        requisition_no = ''
+        requisition_seq = requisition_year = requisition_half = None
+        if has_s2_item:
+            patient_type = str(data.get('patient_type', '') or '').strip()
+            if patient_type not in ('in', 'out'):
+                return JsonResponse({'error': 'Select In Patient or Out Patient for S2 medicines.'}, status=400)
+            if patient_type == 'in':
+                try:
+                    # row lock so two pharmacists can't get the same number
+                    ward = Ward.objects.select_for_update().get(
+                        pk=int(data.get('ward_pk') or 0), is_active=True)
+                except (Ward.DoesNotExist, ValueError, TypeError):
+                    return JsonResponse({'error': 'Select a valid ward for In Patient.'}, status=400)
+                today_local      = timezone.localdate()
+                requisition_year = today_local.year
+                requisition_half = 1 if today_local.month <= 6 else 2
+                requisition_seq, requisition_no = _next_requisition(
+                    ward, requisition_year, requisition_half)
+            else:
+                requisition_no = str(data.get('requisition_no', '') or '').strip()[:100]
+                if not requisition_no:
+                    return JsonResponse({'error': 'Enter the Requisition No. for Out Patient.'}, status=400)
+        
+
         subtotal = sum(v['unit_price'] * v['qty'] for v in validated)
         discount = min(discount_amount, subtotal)
         total    = subtotal - discount
@@ -2710,6 +3251,12 @@ def dispensing_create(request):
             # iHOMIS link — stored as plain integers/strings, no cross-DB FK
             ihomis_hpatkey  = ihomis_hpatkey or '',
             ihomis_hpercode = ihomis_hpercode or '',
+            patient_type    = patient_type,
+            ward            = ward,
+            requisition_no  = requisition_no,
+            requisition_seq = requisition_seq,
+            requisition_year= requisition_year,
+            requisition_half= requisition_half,
         )
 
         # ── Create line items & deduct stock (FEFO) ───────────────────────────
@@ -2771,6 +3318,9 @@ def dispensing_create(request):
                 'discount':        discount,
                 'total':           total,
                 'doctor':          doctor_info,
+                'patient_type': {'in': 'In Patient', 'out': 'Out Patient'}.get(patient_type, ''),
+                'ward': ward.name if ward else '',
+                'requisition_no': requisition_no,
                 # Echo back the linked patient for frontend confirmation
                 'ihomis_hpatkey':  ihomis_hpatkey,
                 'ihomis_hpercode': ihomis_hpercode,
@@ -2785,7 +3335,7 @@ def dispensing_create(request):
 @require(('dispensing', 'dispensing_card'), ajax=True)
 def dispensing_receipt(request, pk):
     txn = get_object_or_404(
-        Dispensing.objects.select_related('pharmacist').prefetch_related('items__medicine'),
+        Dispensing.objects.select_related('pharmacist', 'ward').prefetch_related('items__medicine'),
         pk=pk
     )
     items = [
@@ -2820,6 +3370,9 @@ def dispensing_receipt(request, pk):
         'discount':        float(txn.discount_amount),
         'total':           float(txn.total_amount),
         'doctor':          doctor_info,
+        'patient_type': txn.get_patient_type_display() if txn.patient_type else '',
+        'ward': txn.ward.name if txn.ward else '',
+        'requisition_no': txn.requisition_no,
     })
 
 

@@ -47,6 +47,7 @@ class UserPermission(models.Model):
     reports            = models.BooleanField(default=False)
     consumption_report = models.BooleanField(default=False)
     returns            = models.BooleanField(default=False)
+    pdea_register      = models.BooleanField(default=False)
 
     MODULE_CHOICES = [
         ("inventory",          "Medicine Inventory"),
@@ -59,6 +60,7 @@ class UserPermission(models.Model):
         ("reports",            "Reports & Analytics"),
         ("consumption_report", "Consumption Report"),
         ("returns",            "Returns Management"),
+        ("pdea_register",      "PDEA S2 Register"),
     ]
 
     @classmethod
@@ -95,6 +97,17 @@ class Supplier(models.Model):
     email        = models.EmailField(blank=True)
     address      = models.TextField(blank=True)
     notes        = models.TextField(blank=True)
+
+    # ── Regulatory documents ──────────────────────────────────
+    pdea_permit_no     = models.CharField(max_length=100, blank=True,
+                             verbose_name='PDEA Permit No.')
+    pdea_permit_expiry = models.DateField(null=True, blank=True,
+                             verbose_name='PDEA Permit Expiry')
+    s4_license_no      = models.CharField(max_length=100, blank=True,
+                             verbose_name='S4 License No.')
+    s4_license_expiry  = models.DateField(null=True, blank=True,
+                             verbose_name='S4 License Expiry')
+
     is_active    = models.BooleanField(default=True)
     created_at   = models.DateTimeField(auto_now_add=True)
     updated_at   = models.DateTimeField(auto_now=True)
@@ -102,9 +115,49 @@ class Supplier(models.Model):
     def __str__(self):
         return self.name
 
+    @staticmethod
+    def _doc_status(number, expiry):
+        """'none' | 'no_expiry' | 'expired' | 'expiring_soon' | 'valid'"""
+        if not number:
+            return 'none'
+        if not expiry:
+            return 'no_expiry'
+        today = timezone.now().date()
+        if expiry < today:
+            return 'expired'
+        if expiry <= today + timezone.timedelta(days=30):
+            return 'expiring_soon'
+        return 'valid'
+
+    @property
+    def pdea_status(self):
+        return self._doc_status(self.pdea_permit_no, self.pdea_permit_expiry)
+
+    @property
+    def s4_status(self):
+        return self._doc_status(self.s4_license_no, self.s4_license_expiry)
+
     class Meta:
         ordering = ['name']
 
+
+
+class Ward(models.Model):
+    code      = models.CharField(max_length=20, unique=True)
+    name      = models.CharField(max_length=100)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def requisition_label(self):
+        """Slash-free label used inside requisition numbers, e.g. '1B-MEDICAL-ISOLATION-CD'."""
+        import re
+        return re.sub(r'[^A-Za-z0-9]+', '-', self.name).strip('-').upper()
+
+    class Meta:
+        ordering = ['code']
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DOCTOR  (prescribing physician — required for S2 regulated medicines)
@@ -510,6 +563,17 @@ class Dispensing(models.Model):
                           max_length=50, blank=True, default='',
                           verbose_name='Hospital Number',
                           help_text='Cached hospital number for display')
+
+
+    PATIENT_TYPE_CHOICES = [('in', 'In Patient'), ('out', 'Out Patient')]
+    patient_type     = models.CharField(max_length=3, choices=PATIENT_TYPE_CHOICES,
+                                        blank=True, default='')
+    ward             = models.ForeignKey('Ward', on_delete=models.PROTECT,
+                                         null=True, blank=True, related_name='dispensings')
+    requisition_no   = models.CharField(max_length=100, blank=True, default='', db_index=True)
+    requisition_seq  = models.PositiveIntegerField(null=True, blank=True)  # In Patient running no.
+    requisition_year = models.PositiveIntegerField(null=True, blank=True)
+    requisition_half = models.PositiveSmallIntegerField(null=True, blank=True)  # 1 = Jan–Jun, 2 = Jul–Dec
 
 
 

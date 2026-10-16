@@ -323,6 +323,14 @@
         border-radius: 7px; padding: 6px 10px; font-size: 11px; color: #92400e;
     }
     .ihomis-offline-badge.show { display: flex; }
+    /* ── S2 Requisition ── */
+    .req-section { margin-top:12px; padding-top:12px; border-top:1px dashed #e0e6ed; }
+    .req-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .req-field { display:flex; flex-direction:column; gap:4px; }
+    .req-label { font-size:11px; font-weight:600; color:#64748b; }
+    .req-select, .req-input { width:100%; border:1px solid #e0e6ed; border-radius:8px; padding:8px 11px; font-size:12.5px; font-family:'Poppins',sans-serif; color:#1a2433; outline:none; background:#fff; box-sizing:border-box; transition:border-color .2s,box-shadow .2s; }
+    .req-select:focus, .req-input:focus { border-color:#7c3aed; box-shadow:0 0 0 3px rgba(124,58,237,.1); }
+    .req-auto-note { display:flex; align-items:center; gap:6px; font-size:11.5px; color:#7c3aed; background:rgba(124,58,237,.06); border-radius:8px; padding:8px 10px; margin-top:8px; }
 </style>
 {% endblock %}
 
@@ -582,6 +590,43 @@
                 <i class="fas fa-triangle-exclamation"></i>
                 <span id="s2ExpiringMsg">S2 license is expiring soon — verify before dispensing.</span>
             </div>
+
+            <!-- Patient type & requisition -->
+            <div class="req-section">
+                <div class="doctor-section-label">
+                    <i class="fas fa-file-signature"></i>
+                    Requisition <span style="color:#dc2626;margin-left:2px;">*</span>
+                </div>
+                <div class="req-grid">
+                    <div class="req-field">
+                        <label class="req-label">Patient Type</label>
+                        <select id="patientType" class="req-select" onchange="onPatientTypeChange()">
+                            <option value="">Select…</option>
+                            <option value="in">In Patient</option>
+                            <option value="out">Out Patient</option>
+                        </select>
+                    </div>
+                    <div class="req-field" id="wardField" style="display:none;">
+                        <label class="req-label">Ward</label>
+                        <select id="wardSelect" class="req-select" onchange="updateDispenseButton()">
+                            <option value="">Select ward…</option>
+                            {% for w in wards %}
+                            <option value="{{ w.pk }}">{{ w.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="req-field" id="reqNoField" style="display:none;">
+                        <label class="req-label">Requisition No.</label>
+                        <input type="text" id="requisitionNo" class="req-input" maxlength="100"
+                               placeholder="Type requisition no." oninput="updateDispenseButton()">
+                    </div>
+                </div>
+                <div class="req-auto-note" id="reqAutoNote" style="display:none;">
+                    <i class="fas fa-wand-magic-sparkles"></i>
+                    Requisition No. is generated automatically on dispense (0001/Ward/Year) and restarts every 6 months.
+                </div>
+            </div>
+
         </div>
 
         <!-- Cart items -->
@@ -855,6 +900,21 @@ function clearDoctor() {
     updateDispenseButton();
 }
 
+// ── S2 Requisition ────────────────────────────────────────────
+function onPatientTypeChange() {
+    const t = document.getElementById('patientType').value;
+    document.getElementById('wardField').style.display   = t === 'in'  ? 'flex' : 'none';
+    document.getElementById('reqAutoNote').style.display = t === 'in'  ? 'flex' : 'none';
+    document.getElementById('reqNoField').style.display  = t === 'out' ? 'flex' : 'none';
+    if (t !== 'in')  document.getElementById('wardSelect').value    = '';
+    if (t !== 'out') document.getElementById('requisitionNo').value = '';
+    updateDispenseButton();
+}
+function resetRequisition() {
+    document.getElementById('patientType').value = '';
+    onPatientTypeChange();
+}
+
 // Close dropdown on outside click
 document.addEventListener('click', e => {
     const wrap = document.querySelector('.doctor-search-wrap');
@@ -875,16 +935,14 @@ function checkS2Cart() {
     } else {
         section.classList.remove('visible');
         clearDoctor();
+        resetRequisition();
     }
     updateDispenseButton();
 }
 
 function updateDispenseButton() {
     const btn = document.getElementById('btnDispense');
-    if(!cart.length) {
-        btn.disabled = true;
-        return;
-    }
+    if(!cart.length) { btn.disabled = true; return; }
     if(cartHasS2()) {
         if(!selectedDoctor) {
             btn.disabled = true;
@@ -894,6 +952,16 @@ function updateDispenseButton() {
         if(!selectedDoctor.s2_is_valid) {
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-circle-xmark"></i> Doctor S2 License Invalid';
+            return;
+        }
+        const pt = document.getElementById('patientType').value;
+        let missing = '';
+        if(!pt) missing = 'Select Patient Type';
+        else if(pt === 'in'  && !document.getElementById('wardSelect').value) missing = 'Select Ward';
+        else if(pt === 'out' && !document.getElementById('requisitionNo').value.trim()) missing = 'Enter Requisition No.';
+        if(missing) {
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fas fa-file-signature"></i> ${missing}`;
             return;
         }
     }
@@ -1055,6 +1123,7 @@ function clearCart() {
     document.getElementById('customerNotes').value  = '';
     document.getElementById('discountVal').value    = '';
     clearDoctor();
+    resetRequisition();
     clearCartPatient();
     renderCart();
     checkS2Cart();
@@ -1133,6 +1202,9 @@ function submitDispensing() {
       notes:           document.getElementById('customerNotes').value.trim(),
       discount_amount: discount.toFixed(2),
       doctor_pk:       selectedDoctor ? selectedDoctor.pk : '',
+      patient_type:    cartHasS2() ? document.getElementById('patientType').value : '',
+      ward_pk:         cartHasS2() ? document.getElementById('wardSelect').value : '',
+      requisition_no:  cartHasS2() ? document.getElementById('requisitionNo').value.trim() : '',
       ihomis_hpatkey:  selectedPatient ? selectedPatient.hpatkey  : '',   // ← ADD
       ihomis_hpercode: selectedPatient ? selectedPatient.hospital_number : '',  // ← ADD
       items: cart.map(i => ({ medicine_pk: i.pk, quantity: i.qty, unit_price: i.price })),
@@ -1182,6 +1254,8 @@ function renderReceipt(r) {
         ${r.customer_name ? `<div class="receipt-row"><span>Patient</span><span>${r.customer_name}</span></div>` : ''}
         ${r.prescription_no ? `<div class="receipt-row"><span>Rx No.</span><span>${r.prescription_no}</span></div>` : ''}
         ${r.doctor ? `<div class="receipt-row"><span>Physician</span><span>${r.doctor.name}</span></div>
+        ${r.requisition_no ? `<div class="receipt-row"><span>Req. No.</span><span>${escHtml(r.requisition_no)}</span></div>` : ''}
+        ${r.patient_type ? `<div class="receipt-row"><span>Type</span><span>${escHtml(r.patient_type)}${r.ward ? ' — ' + escHtml(r.ward) : ''}</span></div>` : ''}
         ${r.doctor.s2_license_no ? `<div class="receipt-row"><span>S2 License</span><span>${r.doctor.s2_license_no}</span></div>` : ''}` : ''}
         <hr class="receipt-divider">
         <div class="receipt-items">

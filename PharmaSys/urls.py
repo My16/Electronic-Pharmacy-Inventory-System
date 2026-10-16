@@ -92,7 +92,9 @@ urlpatterns = [
     path('reports/export/excel/', views.report_export_excel, name='report_export_excel'),
     path('reports/export/pdf/',   views.report_export_pdf,   name='report_export_pdf'),
     path('reports/consumption/', views.consumption_report, name='consumption_report'),
-
+    path('reports/pdea-register/', views.pdea_register_report, name='pdea_register'),
+    path('reports/pdea-register/pdf/',   views.pdea_register_export_pdf,   name='pdea_register_export_pdf'),
+    path('reports/pdea-register/excel/', views.pdea_register_export_excel, name='pdea_register_export_excel'),
 
     # ── Dispensing Card ───────────────────────────────────────────────────
     path('dispensing/card/', views.dispensing_card_list, name='dispensing_card_list'),

@@ -1,0 +1,233 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}ePIS — PDEA S2 Register{% endblock %}
+{% block page_title %}PDEA S2 Register{% endblock %}
+{% block breadcrumb %}PDEA S2 Register{% endblock %}
+{% block nav_pdea_register %}active{% endblock %}
+
+{% block extra_css %}
+<style>
+    @page { size: 13in 8.5in; margin: .4in; }
+
+    /* ── Screen toolbar ── */
+    .reg-toolbar { background:#fff; border:1px solid #eef2f7; border-radius:14px; padding:16px 20px; margin-bottom:16px; box-shadow:0 2px 12px rgba(0,0,0,.06); }
+    .reg-filters { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+    .reg-field { display:flex; flex-direction:column; gap:4px; }
+    .reg-field label { font-size:11.5px; font-weight:600; color:#64748b; }
+    .reg-field select, .reg-field input { border:1px solid #e0e6ed; border-radius:8px; padding:8px 11px; font-size:12.5px; font-family:'Poppins',sans-serif; color:#1a2433; background:#f8fafc; outline:none; }
+    .reg-field select:focus, .reg-field input:focus { border-color:#00ADB5; background:#fff; }
+    .btn-gen, .btn-prn { padding:9px 18px; border-radius:8px; border:none; font-size:12.5px; font-weight:600; font-family:'Poppins',sans-serif; cursor:pointer; display:inline-flex; align-items:center; gap:7px; color:#fff; }
+    .btn-gen { background:#00ADB5; }
+    .btn-gen:hover { background:#008C9E; }
+    .btn-prn { background:#1a2433; }
+    .btn-prn:hover { opacity:.9; }
+    .reg-hint { font-size:11.5px; color:#94a3b8; margin-top:10px; }
+    .reg-empty { background:#fff; border:1px solid #eef2f7; border-radius:14px; padding:48px 20px; text-align:center; color:#90a4ae; font-size:13.5px; }
+
+    .reg-summary-table { width:100%; border-collapse:collapse; margin-top:14px; font-size:12px; }
+    .reg-summary-table th { background:#f8fafc; color:#78909c; text-align:left; padding:6px 10px; font-size:11px; }
+    .reg-summary-table td { padding:6px 10px; border-top:1px solid #f0f4f8; }
+
+    /* ── The register sheet ── */
+    .reg-sheet { background:#fff; color:#000; font-family:Arial, Helvetica, sans-serif; border:1px solid #cfd8dc; box-shadow:0 2px 12px rgba(0,0,0,.08); padding:18px 20px; margin-bottom:18px; overflow-x:auto; }
+    .reg-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; }
+    .reg-title-box { border:1px solid #000; padding:4px 10px; font-size:12px; line-height:1.35; }
+    .reg-title-box b { font-size:13px; }
+    .reg-pageno { font-size:12px; margin-top:20px; }
+    .reg-meta { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:6px; }
+    .reg-med { font-size:16px; font-weight:700; }
+    .reg-fwd { font-size:13px; font-weight:700; display:flex; align-items:center; gap:8px; }
+    .reg-fwd-box { border:1px solid #000; padding:3px 12px; font-size:13px; min-width:90px; text-align:center; }
+
+    .reg-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:10px; }
+    .reg-table th, .reg-table td { border:1px solid #000; padding:3px 5px; vertical-align:middle; word-wrap:break-word; }
+    .reg-table th { text-align:center; font-weight:700; font-size:9.5px; line-height:1.25; }
+    .reg-table th.grp { font-size:12px; letter-spacing:1px; }
+    .reg-table td.c { text-align:center; }
+    .reg-table td.num { text-align:center; font-weight:600; }
+    .reg-table tr.blank td { height:22px; }
+    .reg-table .ln { line-height:1.3; }
+
+    .reg-sign { margin-top:18px; text-align:center; }
+    .reg-sign-name { display:inline-block; min-width:300px; border-bottom:1px solid #000; padding:0 20px 2px; font-size:13px; font-weight:700; }
+    .reg-sign-cap { font-size:11px; margin-top:3px; }
+
+    /* ── Print ── */
+    @media print {
+        body { background:#fff !important; }
+        .sidebar, .main-header, .main-footer, .no-print, .alert { display:none !important; }
+        .main-wrapper { margin:0 !important; padding:0 !important; width:100% !important; }
+        .main-content { padding:0 !important; margin:0 !important; }
+        .reg-sheet { border:none; box-shadow:none; padding:0; margin:0; overflow:visible; break-after:page; page-break-after:always; }
+        .reg-sheet:last-child { break-after:auto; page-break-after:auto; }
+    }
+</style>
+{% endblock %}
+
+
+{% block content %}
+
+<div class="reg-toolbar no-print">
+    <form method="GET" action="{% url 'pdea_register' %}" class="reg-filters">
+        <div class="reg-field" style="min-width:260px;">
+            <label>Medicine (S2)</label>
+            <select name="medicine">
+                <option value="all" {% if not selected %}selected{% endif %}>All S2 medicines (one register each)</option>
+                {% for m in s2_meds %}
+                <option value="{{ m.pk }}" {% if m.pk == selected %}selected{% endif %}>{{ m.medicine_name }} {{ m.strength }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="reg-field">
+            <label>From</label>
+            <input type="date" name="date_from" value="{{ date_from|date:'Y-m-d' }}">
+        </div>
+        <div class="reg-field">
+            <label>To</label>
+            <input type="date" name="date_to" value="{{ date_to|date:'Y-m-d' }}">
+        </div>
+        <div class="reg-field">
+            <label>Rows / page</label>
+            <select name="rows">
+                {% for r in rows_options %}<option value="{{ r }}" {% if r == rows_per_page %}selected{% endif %}>{{ r }}</option>{% endfor %}
+            </select>
+        </div>
+        <div class="reg-field" style="width:90px;">
+            <label>Start page</label>
+            <input type="number" name="start_page" min="1" value="{{ start_page }}">
+        </div>
+        <div class="reg-field" style="min-width:230px;">
+            <label>Authorized pharmacist</label>
+            <input type="text" name="pharmacist" value="{{ pharmacist }}">
+        </div>
+        <button type="submit" class="btn-gen"><i class="fas fa-rotate"></i> Generate</button>
+        {% if registers %}
+        <button type="button" class="btn-prn" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+        <button type="submit" formaction="{% url 'pdea_register_export_pdf' %}" class="btn-prn" style="background:#dc2626;">
+            <i class="fas fa-file-pdf"></i> PDF
+        </button>
+        <button type="submit" formaction="{% url 'pdea_register_export_excel' %}" class="btn-prn" style="background:#16a34a;">
+            <i class="fas fa-file-excel"></i> Excel
+        </button>
+        {% endif %}
+    </form>
+
+    {% if registers %}
+    <table class="reg-summary-table">
+        <thead>
+            <tr>
+                <th>Medicine</th>
+                <th>Balance forwarded</th>
+                <th>Received</th>
+                <th>Dispensed / removed</th>
+                <th>Closing balance</th>
+                <th>Pages</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for reg in registers %}
+            <tr>
+                <td style="font-weight:600;">{{ reg.med.generic_name }} {{ reg.med.strength }}</td>
+                <td>{{ reg.opening|floatformat:"0g" }} {{ reg.unit }}</td>
+                <td>{{ reg.total_in|floatformat:"0g" }}</td>
+                <td>{{ reg.total_out|floatformat:"0g" }}</td>
+                <td style="font-weight:600;">{{ reg.closing|floatformat:"0g" }} {{ reg.unit }}</td>
+                <td>{{ reg.pages|length }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div class="reg-hint">Each medicine prints on its own pages. For best results print on Folio / Long (13 × 8.5 in) landscape with margins set to Default and "Background graphics" off.</div>
+    {% endif %}
+</div>
+
+{% if not registers %}
+<div class="reg-empty">
+    <i class="fas fa-book-medical" style="font-size:34px;display:block;margin-bottom:10px;color:#d1d9e0;"></i>
+    No S2 register data found. Mark a medicine as <b>S2 Regulated</b> in Inventory, or widen the date range.
+</div>
+{% else %}
+
+{% for reg in registers %}
+{% with med=reg.med unit=reg.unit %}
+{% for pg in reg.pages %}
+<div class="reg-sheet">
+    <div class="reg-top">
+        <div class="reg-title-box">
+            <b>PDEA S Register 2-14</b><br>
+            ( Records required of a hospital pharmacy)
+        </div>
+        <div class="reg-pageno">Page No. {{ pg.number }}</div>
+    </div>
+
+    <div class="reg-meta">
+        <div class="reg-med">{{ med.generic_name|upper }} {{ med.strength }} {{ unit|lower }}</div>
+        <div class="reg-fwd">Initial Stock / Balance Forwarded
+            <span class="reg-fwd-box">{{ pg.forwarded|floatformat:"0g" }} {{ unit }}</span>
+        </div>
+    </div>
+
+    <table class="reg-table">
+        <colgroup>
+            <col style="width:6%"><col style="width:16%"><col style="width:6%">
+            <col style="width:6%"><col style="width:14%"><col style="width:9%"><col style="width:10%">
+            <col style="width:14%"><col style="width:6%"><col style="width:7%"><col style="width:6%">
+        </colgroup>
+        <thead>
+            <tr>
+                <th class="grp" colspan="3">IN</th>
+                <th class="grp" colspan="8">OUT</th>
+            </tr>
+            <tr>
+                <th>Date<br>Received</th>
+                <th>Supplier Information:<br>Name, address, PDEA license no./ Local Permit No. and date issued</th>
+                <th>Quantity<br>Received</th>
+                <th>Date<br>Dispensed</th>
+                <th>Patient Information: Name, age, ward<br>or<br>Ward Information: Name of Ward, Receiving nurse</th>
+                <th>Rx/Order No.<br>or<br>Requisition No.</th>
+                <th>S2<br>license<br>No.</th>
+                <th>Practitioner Information:<br>Name, Department</th>
+                <th>Quantity<br>Dispensed</th>
+                <th>Balance</th>
+                <th>Remarks</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in pg.rows %}
+            <tr>
+                {% if r.kind == 'in' %}
+                    <td class="c">{{ r.date }}</td>
+                    <td>{% for ln in r.info_lines %}<div class="ln">{{ ln }}</div>{% endfor %}</td>
+                    <td class="num">{{ r.qty|floatformat:"0g" }} {{ unit }}</td>
+                    <td></td><td></td><td></td><td></td><td></td><td></td>
+                {% else %}
+                    <td></td><td></td><td></td>
+                    <td class="c">{{ r.date }}</td>
+                    <td class="c">{{ r.patient }}</td>
+                    <td class="c">{{ r.req }}</td>
+                    <td class="c">{{ r.s2 }}</td>
+                    <td class="c">{{ r.practitioner }}</td>
+                    <td class="num">{{ r.qty|floatformat:"0g" }} {{ unit }}</td>
+                {% endif %}
+                <td class="num">{{ r.balance|floatformat:"0g" }} {{ unit }}</td>
+                <td class="c">{{ r.remarks }}</td>
+            </tr>
+            {% endfor %}
+            {% for _ in pg.blank_rows %}
+            <tr class="blank"><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="reg-sign">
+        <div class="reg-sign-name">{{ pharmacist }}</div>
+        <div class="reg-sign-cap">SIGNATURE OVER PRINTED NAME OF AUTHORIZED PHARMACIST</div>
+    </div>
+</div>
+{% endfor %}
+{% endwith %}
+{% endfor %}
+
+{% endif %}
+{% endblock %}

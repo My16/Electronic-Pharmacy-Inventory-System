@@ -175,6 +175,12 @@
     .toast.show { transform:translateY(0); opacity:1; }
     .toast.success i { color:#4ade80; }
     .toast.error   i { color:#f87171; }
+
+    .doc-badge { display:inline-block; margin-top:5px; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:20px; }
+    .doc-badge.valid         { background:rgba(34,197,94,.1);  color:#16a34a; }
+    .doc-badge.expiring_soon { background:rgba(245,158,11,.12); color:#d97706; }
+    .doc-badge.expired       { background:rgba(239,68,68,.1);  color:#dc2626; }
+    .doc-badge.no_expiry     { background:rgba(59,130,246,.1); color:#2563eb; }
 </style>
 {% endblock %}
 
@@ -323,6 +329,10 @@
                                 data-email="{{ s.email }}"
                                 data-address="{{ s.address }}"
                                 data-notes="{{ s.notes }}"
+                                data-pdea_permit_no="{{ s.pdea_permit_no }}"
+                                data-pdea_permit_expiry="{{ s.pdea_permit_expiry|date:'Y-m-d' }}"
+                                data-s4_license_no="{{ s.s4_license_no }}"
+                                data-s4_license_expiry="{{ s.s4_license_expiry|date:'Y-m-d' }}"
                                 data-is_active="{{ s.is_active|yesno:'true,false' }}"
                                 onclick="openEditModal(this)">
                             <i class="fas fa-pen-to-square"></i>
@@ -422,6 +432,25 @@
                         <input type="email" name="email" class="form-control" placeholder="supplier@example.com">
                     </div>
                 </div>
+                <div class="section-label">Regulatory Documents</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label class="form-label">PDEA Permit No.</label>
+                        <input type="text" name="pdea_permit_no" class="form-control" placeholder="Permit number">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">PDEA Permit Expiry</label>
+                        <input type="date" name="pdea_permit_expiry" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">S4 License No.</label>
+                        <input type="text" name="s4_license_no" class="form-control" placeholder="License number">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">S4 License Expiry</label>
+                        <input type="date" name="s4_license_expiry" class="form-control">
+                    </div>
+                </div>
                 <div class="section-label">Additional Details</div>
                 <div class="form-grid full">
                     <div class="form-group">
@@ -469,6 +498,25 @@
                     <div class="form-group" style="grid-column:span 2;">
                         <label class="form-label">Email Address</label>
                         <input type="email" name="email" id="e_email" class="form-control">
+                    </div>
+                </div>
+                <div class="section-label">Regulatory Documents</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label class="form-label">PDEA Permit No.</label>
+                        <input type="text" name="pdea_permit_no" id="e_pdea_permit_no" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">PDEA Permit Expiry</label>
+                        <input type="date" name="pdea_permit_expiry" id="e_pdea_permit_expiry" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">S4 License No.</label>
+                        <input type="text" name="s4_license_no" id="e_s4_license_no" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">S4 License Expiry</label>
+                        <input type="date" name="s4_license_expiry" id="e_s4_license_expiry" class="form-control">
                     </div>
                 </div>
                 <div class="section-label">Additional Details</div>
@@ -574,6 +622,10 @@ function openEditModal(btn) {
     document.getElementById('e_email').value        = btn.getAttribute('data-email')        || '';
     document.getElementById('e_address').value      = btn.getAttribute('data-address')      || '';
     document.getElementById('e_notes').value        = btn.getAttribute('data-notes')        || '';
+    document.getElementById('e_pdea_permit_no').value     = btn.getAttribute('data-pdea_permit_no')     || '';
+    document.getElementById('e_pdea_permit_expiry').value = btn.getAttribute('data-pdea_permit_expiry') || '';
+    document.getElementById('e_s4_license_no').value      = btn.getAttribute('data-s4_license_no')      || '';
+    document.getElementById('e_s4_license_expiry').value  = btn.getAttribute('data-s4_license_expiry')  || '';
     document.getElementById('e_is_active').value    = btn.getAttribute('data-is_active') === 'true' ? 'true' : 'false';
     openModal('editModal');
 }
@@ -617,6 +669,18 @@ function renderViewModal(d) {
             </tr>`).join('')
         : `<tr><td colspan="6"><div class="history-empty"><i class="fas fa-clock-rotate-left"></i>No purchase history yet.</div></td></tr>`;
 
+
+    const DOC_LABELS = { valid:'Valid', expiring_soon:'Expiring soon', expired:'Expired', no_expiry:'No expiry date' };
+    const docItem = (label, no, exp, status) => `
+        <div class="detail-item">
+            <div class="detail-item-label"><i class="fas fa-file-shield"></i> ${label}</div>
+            <div class="detail-item-value ${no ? '' : 'empty'}">${no || 'Not provided'}</div>
+            ${no ? `<div class="supplier-sub">Valid until: ${exp || '—'}</div>
+                    <span class="doc-badge ${status}">${DOC_LABELS[status] || ''}</span>` : ''}
+        </div>`;
+
+
+
     document.getElementById('viewModalBody').innerHTML = `
         <div class="detail-header-card">
             <div class="detail-avatar">${initial}</div>
@@ -640,6 +704,8 @@ function renderViewModal(d) {
                 <div class="detail-item-label"><i class="fas fa-location-dot"></i> Address</div>
                 <div class="detail-item-value ${d.address ? '' : 'empty'}">${d.address || 'Not provided'}</div>
             </div>
+            ${docItem('PDEA Permit', d.pdea_permit_no, d.pdea_permit_expiry, d.pdea_status)}
+            ${docItem('S4 License',  d.s4_license_no,  d.s4_license_expiry,  d.s4_status)}
             ${d.notes ? `
             <div class="detail-item" style="grid-column:span 2;">
                 <div class="detail-item-label"><i class="fas fa-note-sticky"></i> Notes</div>
