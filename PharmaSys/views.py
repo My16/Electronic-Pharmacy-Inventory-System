@@ -2753,16 +2753,30 @@ def _pdea_register_context(request):
     except (TypeError, ValueError):
         start_page = 1
 
-    med_id  = _to_int(request.GET.get('medicine'))
-    single  = s2_meds.filter(pk=med_id).first() if med_id else None
-    targets = [single] if single else list(s2_meds)
+    med_param = request.GET.get('medicine', '').strip()
+    med_id    = _to_int(med_param)
+    single    = s2_meds.filter(pk=med_id).first() if med_id else None
+
+    if med_param == 'all':
+        targets = list(s2_meds)
+    elif single:
+        targets = [single]
+    else:
+        targets = []          # nothing chosen yet -> empty page
 
     registers = []
     for m in targets:
         reg = _pdea_register_build(m, date_from, date_to, rows_per_page, start_page)
-        if not single and not reg['has_events'] and reg['opening'] == 0:
+        if med_param == 'all' and not reg['has_events'] and reg['opening'] == 0:
             continue
         registers.append(reg)
+
+    if med_param == 'all':
+        selected_label = 'All S2 medicines (one register each)'
+    elif single:
+        selected_label = f'{single.medicine_name} {single.strength}'
+    else:
+        selected_label = ''
 
     return {
         's2_meds': s2_meds, 'registers': registers,
@@ -2771,6 +2785,9 @@ def _pdea_register_context(request):
         'rows_per_page': rows_per_page, 'rows_options': rows_options,
         'start_page': start_page,
         'pharmacist': request.GET.get('pharmacist', '').strip() or _formatted_user_name(request.user),
+        'med_param': med_param if (med_param == 'all' or single) else '',
+        'selected_label': selected_label,
+        'generated': bool(med_param == 'all' or single),
     }
 
 
