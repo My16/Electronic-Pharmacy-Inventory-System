@@ -95,6 +95,12 @@ urlpatterns = [
     path('reports/pdea-register/', views.pdea_register_report, name='pdea_register'),
     path('reports/pdea-register/pdf/',   views.pdea_register_export_pdf,   name='pdea_register_export_pdf'),
     path('reports/pdea-register/excel/', views.pdea_register_export_excel, name='pdea_register_export_excel'),
+    path('reports/stock-card/',        views.stock_card_report,       name='stock_card_report'),
+    path('reports/stock-card/pdf/',    views.stock_card_export_pdf,   name='stock_card_export_pdf'),
+    path('reports/stock-card/excel/',  views.stock_card_export_excel, name='stock_card_export_excel'),
+    path('reports/supplies-ledger/',        views.supplies_ledger_report,       name='supplies_ledger_report'),
+    path('reports/supplies-ledger/pdf/',    views.supplies_ledger_export_pdf,   name='supplies_ledger_export_pdf'),
+    path('reports/supplies-ledger/excel/',  views.supplies_ledger_export_excel, name='supplies_ledger_export_excel'),
 
     # ── Dispensing Card ───────────────────────────────────────────────────
     path('dispensing/card/', views.dispensing_card_list, name='dispensing_card_list'),

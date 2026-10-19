@@ -4699,3 +4699,857 @@ def returns_report_data(request):
             'date_from': date_from.isoformat(), 'date_to': date_to.isoformat(),
         },
     })
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STOCK CARD  (Appendix 127 — one medicine per card, portrait Folio 8.5 x 13)
+# ─────────────────────────────────────────────────────────────────────────────
+
+STOCK_CARD_HOSPITAL     = 'MAYOR HILARION A. RAMIRO, SR. MEDICAL CENTER'
+STOCK_CARD_ROWS_OPTIONS = (25, 30, 35)
+STOCK_CARD_UNITS = {
+    'tablet': 'tablet', 'capsule': 'capsule', 'syrup': 'bottle', 'suspension': 'bottle',
+    'injection': 'ampule/vial', 'cream': 'tube', 'ointment': 'tube', 'drops': 'bottle',
+    'inhaler': 'piece', 'patch': 'piece', 'suppository': 'piece', 'powder': 'sachet',
+    'other': 'piece',
+}
+
+
+def _stock_card_bucket(d):
+    """5-day period inside the month: 1-5, 6-10, 11-15, 16-20, 21-25, 26-end."""
+    start = min((d.day - 1) // 5, 5) * 5 + 1
+    last  = calendar.monthrange(d.year, d.month)[1]
+    end   = last if start == 26 else start + 4
+    return start, end
+
+
+def _stock_card_build(med, date_from, date_to, rows_per_page):
+    """Builds the paged stock card for ONE medicine (issuances grouped per 5 days)."""
+    start_dt = timezone.make_aware(datetime.combine(date_from, datetime.min.time()))
+    end_dt   = timezone.make_aware(datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+
+    prev = (StockMovement.objects.filter(medicine=med, created_at__lt=start_dt)
+            .order_by('-created_at', '-id').first())
+    opening = prev.quantity_after if prev else 0
+
+    moves = list(StockMovement.objects
+                 .filter(medicine=med, created_at__gte=start_dt, created_at__lt=end_dt)
+                 .exclude(movement_type='transfer')
+                 .select_related('supplier')
+                 .order_by('created_at', 'id'))
+
+    txn_ids = {int(m.reference_no[4:]) for m in moves
+               if m.reference_no.startswith('TXN-') and m.reference_no[4:].isdigit()}
+    txns = Dispensing.objects.select_related('ward').in_bulk(txn_ids)
+
+    def patient_name(m):
+        t = txns.get(int(m.reference_no[4:])) if m.reference_no[4:].isdigit() else None
+        if t:
+            return (t.customer_name or '').strip() or (t.ward.name if t.ward else 'Walk-in')
+        return (m.dispensed_to or '').strip() or 'Walk-in'
+
+    def other_out_label(m):
+        tag = {'expired': 'Expired', 'damaged': 'Damaged', 'adjust': 'Adjustment',
+               'audit': 'Audit adj.'}.get(m.movement_type, 'Stock out')
+        return ' — '.join(p for p in (tag, m.dispensed_to, m.notes) if p)
+
+    def receipt_lines(m):
+        if m.movement_type == 'return':
+            return ['Return'] + ([m.reference_no] if m.reference_no else [])
+        if m.movement_type in ('adjust', 'audit'):
+            return [' — '.join(p for p in ('Adjustment', m.notes) if p)]
+        lines = [m.supplier.name if m.supplier else 'Received']
+        if m.reference_no:
+            lines.append(f'DR No.: {m.reference_no}')
+        if m.purchase_price:
+            lines.append(f'Price: {m.purchase_price:,.2f}')
+        return lines
+
+    rows, buckets = [], {}
+    for m in moves:
+        if not m.quantity:
+            continue
+        d = timezone.localtime(m.created_at).date()
+
+        if m.quantity > 0:                                   # RECEIPT
+            rows.append({'date_s': d.strftime('%m/%d/%Y'), 'order': m.created_at, 'kind': 'in',
+                         'qty': m.quantity, 'expiry': m.expiry_date,
+                         'names': receipt_lines(m), 'et_al': False})
+            continue
+
+        if m.reference_no.startswith('TXN-'):                # ISSUANCE → 5-day bucket
+            s, e = _stock_card_bucket(d)
+            key = (d.year, d.month, s)
+            r = buckets.get(key)
+            if r is None:
+                r = {'date_s': f'{d.month}/{s}-{e}/{d.year % 100}', 'order': m.created_at,
+                     'kind': 'out', 'qty': 0, 'expiry': None, 'names': [], 'et_al': False}
+                buckets[key] = r
+                rows.append(r)
+            r['qty'] += -m.quantity
+            r['order'] = m.created_at
+            nm = patient_name(m)
+            if not r['names']:
+                r['names'] = [nm]                            # one representative only
+            elif nm != r['names'][0]:
+                r['et_al'] = True
+        else:                                                # expired / damaged / adjust
+            rows.append({'date_s': d.strftime('%m/%d/%Y'), 'order': m.created_at, 'kind': 'out',
+                         'qty': -m.quantity, 'expiry': None,
+                         'names': [other_out_label(m)], 'et_al': False})
+
+    rows.sort(key=lambda r: r['order'])
+
+    bal = opening
+    for r in rows:
+        bal += r['qty'] if r['kind'] == 'in' else -r['qty']
+        ref = '\n'.join(r['names'])
+        if r['et_al']:
+            ref += '; et al'
+        r['ref']     = ref
+        r['balance'] = bal
+        r['exp_s']   = r['expiry'].strftime('%m/%d/%Y') if r['expiry'] else ''
+        r['in_qty']  = r['qty'] if r['kind'] == 'in'  else ''
+        r['out_qty'] = r['qty'] if r['kind'] == 'out' else ''
+
+    cap    = rows_per_page - 1            # 1 row per page is the Price / balance-forwarded row
+    chunks = [rows[i:i + cap] for i in range(0, len(rows), cap)] or [[]]
+    pages, carry = [], opening
+    for n, chunk in enumerate(chunks, 1):
+        pages.append({'number': n, 'total': len(chunks), 'forwarded': carry,
+                      'rows': chunk, 'blank_rows': range(max(cap - len(chunk), 0))})
+        if chunk:
+            carry = chunk[-1]['balance']
+
+    price = med.purchase_price or med.selling_price
+    desc  = f'{med.generic_name or med.medicine_name} {med.strength}'.strip()
+    if med.brand_name:
+        desc += f' ({med.brand_name})'
+    return {
+        'med': med, 'pages': pages, 'opening': opening, 'closing': bal,
+        'has_events': bool(rows),
+        'price': f'{price:,.2f}',
+        'unit': STOCK_CARD_UNITS.get(med.dosage_form, 'piece'),
+        'stock_no': med.barcode or f'MED-{med.pk:04d}',
+        'description': desc,
+        'reorder': med.reorder_level,
+    }
+
+
+def _stock_card_context(request):
+    today     = timezone.localdate()
+    date_from = _parse_iso(request.GET.get('date_from'), today.replace(day=1))
+    date_to   = _parse_iso(request.GET.get('date_to'), today)
+    if date_to < date_from:
+        date_from, date_to = date_to, date_from
+
+    try:
+        rows_per_page = int(request.GET.get('rows', 35))
+    except (TypeError, ValueError):
+        rows_per_page = 35
+    if rows_per_page not in STOCK_CARD_ROWS_OPTIONS:
+        rows_per_page = 35
+
+    meds      = Medicine.objects.filter(is_active=True).order_by('medicine_name')
+    med_param = request.GET.get('medicine', '')
+    cards = []
+    if med_param == 'all':
+        for m in meds:
+            c = _stock_card_build(m, date_from, date_to, rows_per_page)
+            if c['has_events'] or c['opening']:
+                cards.append(c)
+    elif _to_int(med_param):
+        m = meds.filter(pk=_to_int(med_param)).first()
+        if m:
+            cards.append(_stock_card_build(m, date_from, date_to, rows_per_page))
+
+    return {
+        'medicines': meds, 'cards': cards, 'med_param': med_param,
+        'date_from': date_from, 'date_to': date_to,
+        'rows_per_page': rows_per_page, 'rows_options': STOCK_CARD_ROWS_OPTIONS,
+        'hospital_name': STOCK_CARD_HOSPITAL,
+    }
+
+
+def _stock_card_tag(ctx):
+    return (re.sub(r'[^A-Za-z0-9]+', '_', ctx['cards'][0]['med'].generic_name).strip('_')
+            if len(ctx['cards']) == 1 else 'ALL')
+
+
+@require('stock_card')
+def stock_card_report(request):
+    return render(request, 'stock_card.html', _stock_card_context(request))
+
+
+# ── PDF ──────────────────────────────────────────────────────────────────────
+@require('stock_card')
+def stock_card_export_pdf(request):
+    if not REPORTLAB_AVAILABLE:
+        messages.error(request, 'reportlab is not installed. Run: pip install reportlab')
+        return redirect('stock_card_report')
+    from reportlab.platypus import PageBreak
+
+    ctx = _stock_card_context(request)
+    if not ctx['cards']:
+        messages.error(request, 'Select a medicine to generate its Stock Card.')
+        return redirect('stock_card_report')
+
+    FOLIO   = (8.5 * inch, 13 * inch)                 # portrait Folio
+    margin  = 0.5 * inch
+    avail_w = FOLIO[0] - 2 * margin
+    black   = colors.black
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=FOLIO, leftMargin=margin, rightMargin=margin,
+                            topMargin=margin, bottomMargin=margin,
+                            title='Stock Card', author='MHARSMC ePIS')
+
+    ss       = getSampleStyleSheet()
+    base     = ParagraphStyle('b', parent=ss['Normal'], fontName='Helvetica', fontSize=8, leading=10)
+    cell     = ParagraphStyle('c', parent=base, alignment=TA_CENTER)
+    cell_l   = ParagraphStyle('cl', parent=base, alignment=TA_LEFT)
+    bold_c   = ParagraphStyle('bc', parent=cell, fontName='Helvetica-Bold')
+    head     = ParagraphStyle('h', parent=cell, fontName='Helvetica-Bold', fontSize=8.5)
+    hosp     = ParagraphStyle('ho', parent=base, fontName='Helvetica-Bold', fontSize=13, leading=16,
+                              alignment=TA_CENTER)
+    title    = ParagraphStyle('t', parent=base, fontName='Helvetica-Bold', fontSize=12, leading=15,
+                              alignment=TA_CENTER)
+    sub      = ParagraphStyle('s', parent=base, fontSize=8.5, alignment=TA_CENTER,
+                              textColor=colors.HexColor('#444444'))
+    right    = ParagraphStyle('r', parent=base, fontSize=9, alignment=TA_RIGHT)
+    lab      = ParagraphStyle('lab', parent=base, fontSize=9, leading=12)
+    price_st = ParagraphStyle('p', parent=cell_l, textColor=colors.HexColor('#C00000'))
+
+    def P(text, st=cell):
+        return Paragraph(_xml_escape(str(text)).replace('\n', '<br/>'), st)
+
+    fr    = [12, 34, 12, 14, 14, 14]                  # Date | Reference | R.Qty | Exp | I.Qty | Balance
+    col_w = [avail_w * f / 100 for f in fr]
+
+    story, first = [], True
+    for card in ctx['cards']:
+        for pg in card['pages']:
+            if not first:
+                story.append(PageBreak())
+            first = False
+
+            story.append(Paragraph('Appendix 127', right))
+            story.append(Spacer(1, 4))
+
+            top = Table([[Paragraph('<u>' + _xml_escape(ctx['hospital_name']) + '</u>', hosp)],
+                         [Paragraph('STOCK CARD', title)],
+                         [Paragraph(f'{ctx["date_from"]:%B %d, %Y} – {ctx["date_to"]:%B %d, %Y}'
+                                    f'  |  Page {pg["number"]} of {pg["total"]}', sub)]],
+                        colWidths=[avail_w])
+            top.setStyle(TableStyle([('BOX', (0, 0), (-1, -1), 0.8, black),
+                                     ('TOPPADDING', (0, 0), (-1, -1), 3),
+                                     ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
+            story.append(top)
+
+            info = Table([
+                [Paragraph(f'<b>ITEM / DESCRIPTION:</b> {_xml_escape(card["description"])}', lab),
+                 Paragraph(f'<b>STOCK NO.:</b> {_xml_escape(card["stock_no"])}', lab)],
+                [Paragraph(f'<b>UNIT:</b> {_xml_escape(card["unit"])}', lab),
+                 Paragraph(f'<b>RE-ORDER POINT:</b> {card["reorder"]}', lab)],
+            ], colWidths=[avail_w * 0.62, avail_w * 0.38])
+            info.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.8, black),
+                                      ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                                      ('TOPPADDING', (0, 0), (-1, -1), 6),
+                                      ('BOTTOMPADDING', (0, 0), (-1, -1), 6)]))
+            story.append(info)
+
+            data = [
+                [P('Date', head), P('Reference', head), P('Receipt', head), '',
+                 P('Issuance', head), P('Balance', head)],
+                ['', '', P('Qty', head), P('Expiration<br/>Date', head), P('Qty', head), ''],
+            ]
+            # Price / balance-forwarded row
+            data.append(['', P(f'Price: {card["price"]}', price_st), '', '', '',
+                         P(f'{pg["forwarded"]:,}', bold_c)])
+            for r in pg['rows']:
+                data.append([P(r['date_s']), P(r['ref'], cell_l),
+                             P(f'{r["in_qty"]:,}') if r['in_qty'] != '' else '',
+                             P(r['exp_s']),
+                             P(f'{r["out_qty"]:,}') if r['out_qty'] != '' else '',
+                             P(f'{r["balance"]:,}', bold_c)])
+            blanks = len(pg['blank_rows'])
+            data += [[''] * 6 for _ in range(blanks)]
+
+            heights = [None] * (3 + len(pg['rows'])) + [0.26 * inch] * blanks
+            tbl = Table(data, colWidths=col_w, rowHeights=heights, repeatRows=2)
+            tbl.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.7, black),
+                ('SPAN', (0, 0), (0, 1)), ('SPAN', (1, 0), (1, 1)),
+                ('SPAN', (2, 0), (3, 0)), ('SPAN', (5, 0), (5, 1)),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('LEFTPADDING', (0, 0), (-1, -1), 4), ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ]))
+            story.append(tbl)
+
+    doc.build(story)
+    resp = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    resp['Content-Disposition'] = (
+        f'attachment; filename="StockCard_{_stock_card_tag(ctx)}_{ctx["date_from"]}_{ctx["date_to"]}.pdf"')
+    return resp
+
+
+# ── Excel ────────────────────────────────────────────────────────────────────
+@require('stock_card')
+def stock_card_export_excel(request):
+    if not OPENPYXL_AVAILABLE:
+        messages.error(request, 'openpyxl is not installed. Run: pip install openpyxl')
+        return redirect('stock_card_report')
+    from openpyxl.worksheet.pagebreak import Break
+    from openpyxl.worksheet.properties import PageSetupProperties
+
+    ctx = _stock_card_context(request)
+    if not ctx['cards']:
+        messages.error(request, 'Select a medicine to generate its Stock Card.')
+        return redirect('stock_card_report')
+
+    thin    = Side(style='thin', color='000000')
+    box     = Border(left=thin, right=thin, top=thin, bottom=thin)
+    f_norm  = Font(name='Arial', size=9)
+    f_bold  = Font(name='Arial', size=9, bold=True)
+    f_head  = Font(name='Arial', size=10, bold=True)
+    f_hosp  = Font(name='Arial', size=14, bold=True, underline='single')
+    f_ttl   = Font(name='Arial', size=12, bold=True)
+    f_price = Font(name='Arial', size=9, color='C00000')
+    ctr = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    lft = Alignment(horizontal='left',   vertical='center', wrap_text=True)
+    rgt = Alignment(horizontal='right',  vertical='center')
+    widths = [14, 42, 12, 15, 12, 13]
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    used = set()
+
+    for card in ctx['cards']:
+        ws = wb.create_sheet(_xl_sheet_title(card['med'], used))
+        for i, w in enumerate(widths, 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+        ws.page_setup.orientation = 'portrait'
+        ws.page_setup.paperSize   = 14                 # Folio 8.5 x 13 in
+        ws.page_setup.fitToWidth  = 1
+        ws.page_setup.fitToHeight = 0
+        ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+        ws.page_margins.left = ws.page_margins.right = 0.5
+        ws.page_margins.top  = ws.page_margins.bottom = 0.5
+        ws.print_options.horizontalCentered = True
+
+        r = 1
+        for pg in card['pages']:
+            _xl_merge(ws, r, 1, r, 6, 'Appendix 127', Font(name='Arial', size=9), rgt); r += 1
+            _xl_merge(ws, r, 1, r, 6, ctx['hospital_name'], f_hosp, ctr, box)
+            ws.row_dimensions[r].height = 24; r += 1
+            _xl_merge(ws, r, 1, r, 6, 'STOCK CARD', f_ttl, ctr, box); r += 1
+            _xl_merge(ws, r, 1, r, 6,
+                      f'{ctx["date_from"]:%B %d, %Y} – {ctx["date_to"]:%B %d, %Y}'
+                      f'   |   Page {pg["number"]} of {pg["total"]}',
+                      Font(name='Arial', size=8, color='555555'), ctr, box); r += 1
+
+            _xl_merge(ws, r, 1, r, 4, f'ITEM / DESCRIPTION:  {card["description"]}', f_bold, lft, box)
+            _xl_merge(ws, r, 5, r, 6, f'STOCK NO.:  {card["stock_no"]}', f_bold, lft, box)
+            ws.row_dimensions[r].height = 30; r += 1
+            _xl_merge(ws, r, 1, r, 4, f'UNIT:  {card["unit"]}', f_bold, lft, box)
+            _xl_merge(ws, r, 5, r, 6, f'RE-ORDER POINT:  {card["reorder"]}', f_bold, lft, box)
+            ws.row_dimensions[r].height = 22; r += 1
+
+            # column headers
+            _xl_merge(ws, r, 1, r + 1, 1, 'Date', f_head, ctr, box)
+            _xl_merge(ws, r, 2, r + 1, 2, 'Reference', f_head, ctr, box)
+            _xl_merge(ws, r, 3, r, 4, 'Receipt', f_head, ctr, box)
+            _xl_merge(ws, r, 5, r, 5, 'Issuance', f_head, ctr, box)
+            _xl_merge(ws, r, 6, r + 1, 6, 'Balance', f_head, ctr, box)
+            for c, label in ((3, 'Qty'), (4, 'Expiration\nDate'), (5, 'Qty')):
+                cell = ws.cell(r + 1, c, label)
+                cell.font, cell.alignment, cell.border = f_head, ctr, box
+            ws.row_dimensions[r].height = 20
+            ws.row_dimensions[r + 1].height = 32
+            r += 2
+
+            # Price / balance-forwarded row
+            for c in range(1, 7):
+                ws.cell(r, c).border = box
+            ws.cell(r, 2, f'Price: {card["price"]}').font = f_price
+            ws.cell(r, 2).alignment = lft
+            b = ws.cell(r, 6, pg['forwarded'])
+            b.font, b.alignment, b.number_format = f_bold, ctr, '#,##0'
+            ws.row_dimensions[r].height = 20
+            r += 1
+
+            # data rows
+            for rw in pg['rows']:
+                vals = [rw['date_s'], rw['ref'], rw['in_qty'], rw['exp_s'], rw['out_qty'], rw['balance']]
+                for c, v in enumerate(vals, 1):
+                    cell = ws.cell(r, c, v)
+                    cell.font      = f_bold if c == 6 else f_norm
+                    cell.border    = box
+                    cell.alignment = lft if c == 2 else ctr
+                    if c in (3, 5, 6):
+                        cell.number_format = '#,##0'
+                ws.row_dimensions[r].height = max(20, 12.5 * _xl_lines(rw['ref'], widths[1]) + 6)
+                r += 1
+            for _ in pg['blank_rows']:
+                for c in range(1, 7):
+                    ws.cell(r, c).border = box
+                ws.row_dimensions[r].height = 20
+                r += 1
+
+            ws.row_breaks.append(Break(id=r))          # next card page starts on a new printed page
+            r += 2
+
+    resp = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    resp['Content-Disposition'] = (
+        f'attachment; filename="StockCard_{_stock_card_tag(ctx)}_{ctx["date_from"]}_{ctx["date_to"]}.xlsx"')
+    wb.save(resp)
+    return resp
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SUPPLIES LEDGER CARD  (Accounting Form No. 84 — portrait Folio 8.5 x 13)
+# Reuses STOCK_CARD_UNITS, STOCK_CARD_HOSPITAL, _stock_card_bucket,
+# _stock_card_tag, _xl_merge, _xl_lines and _xl_sheet_title from earlier code.
+# ─────────────────────────────────────────────────────────────────────────────
+from decimal import Decimal
+
+SUPPLIES_LEDGER_ROWS_OPTIONS = (30, 35, 40)
+
+
+def _supplies_ledger_build(med, date_from, date_to, rows_per_page, group):
+    """One medicine → paged ledger with Receipts / Issues / Balances (qty + cost)."""
+    start_dt = timezone.make_aware(datetime.combine(date_from, datetime.min.time()))
+    end_dt   = timezone.make_aware(datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+    zero     = Decimal('0')
+    cent     = Decimal('0.01')
+    fallback = Decimal(str(med.purchase_price or med.selling_price or 0))
+
+    def price_of(p):
+        return Decimal(str(p)) if p else fallback
+
+    # ── Opening balance (qty + cost) before the period ───────────────────────
+    prev = (StockMovement.objects.filter(medicine=med, created_at__lt=start_dt)
+            .order_by('-created_at', '-id').first())
+    opening_qty  = prev.quantity_after if prev else 0
+    opening_cost = zero
+    for q, p in (StockMovement.objects.filter(medicine=med, created_at__lt=start_dt)
+                 .values_list('quantity', 'purchase_price')):
+        opening_cost += q * price_of(p)
+    if opening_qty <= 0 or opening_cost < 0:
+        opening_cost = zero
+
+    moves = list(StockMovement.objects
+                 .filter(medicine=med, created_at__gte=start_dt, created_at__lt=end_dt)
+                 .exclude(movement_type='transfer')
+                 .select_related('supplier')
+                 .order_by('created_at', 'id'))
+
+    txn_ids = {int(m.reference_no[4:]) for m in moves
+               if m.reference_no.startswith('TXN-') and m.reference_no[4:].isdigit()}
+    txns = Dispensing.objects.select_related('ward').in_bulk(txn_ids)
+
+    def patient_name(m):
+        t = txns.get(int(m.reference_no[4:])) if m.reference_no[4:].isdigit() else None
+        if t:
+            return (t.customer_name or '').strip() or (t.ward.name if t.ward else 'Walk-in')
+        return (m.dispensed_to or '').strip() or 'Walk-in'
+
+    def other_out_label(m):
+        tag = {'expired': 'Expired', 'damaged': 'Damaged', 'adjust': 'Adjustment',
+               'audit': 'Audit adj.'}.get(m.movement_type, 'Stock out')
+        return ' — '.join(p for p in (tag, m.dispensed_to, m.notes) if p)
+
+    def receipt_lines(m):
+        if m.movement_type == 'return':
+            return ['Return'] + ([m.reference_no] if m.reference_no else [])
+        if m.movement_type in ('adjust', 'audit'):
+            return [' — '.join(p for p in ('Adjustment', m.notes) if p)]
+        lines = [m.supplier.name if m.supplier else 'Received']
+        if m.reference_no:
+            lines.append(f'DR No.: {m.reference_no}')
+        return lines
+
+    def issue_key_and_date(m, d):
+        if group == '0':
+            return ('m', m.pk), d.strftime('%m/%d/%Y')
+        if group == '1':
+            return ('d', d), d.strftime('%m/%d/%Y')
+        s, e = _stock_card_bucket(d)
+        return ('b', d.year, d.month, s), f'{d.month}/{s}-{e}/{d.year % 100}'
+
+    rows, buckets = [], {}
+    for m in moves:
+        if not m.quantity:
+            continue
+        d = timezone.localtime(m.created_at).date()
+        price = price_of(m.purchase_price)
+
+        if m.quantity > 0:                                       # RECEIPT
+            rows.append({'date_s': d.strftime('%m/%d/%Y'), 'order': m.created_at, 'kind': 'in',
+                         'qty': m.quantity, 'unit': price, 'cost': m.quantity * price,
+                         'names': receipt_lines(m), 'et_al': False})
+            continue
+
+        if m.reference_no.startswith('TXN-'):                    # ISSUE (dispensing)
+            key, date_s = issue_key_and_date(m, d)
+            r = buckets.get(key)
+            if r is None:
+                r = {'date_s': date_s, 'order': m.created_at, 'kind': 'out',
+                     'qty': 0, 'unit': None, 'cost': zero, 'names': [], 'et_al': False}
+                buckets[key] = r
+                rows.append(r)
+            r['qty']  += -m.quantity
+            r['cost'] += (-m.quantity) * price
+            r['order'] = m.created_at
+            nm = patient_name(m)
+            if not r['names']:
+                r['names'] = [nm]                                # one representative only
+            elif nm != r['names'][0]:
+                r['et_al'] = True
+        else:                                                    # expired / damaged / adjust
+            rows.append({'date_s': d.strftime('%m/%d/%Y'), 'order': m.created_at, 'kind': 'out',
+                         'qty': -m.quantity, 'unit': None, 'cost': (-m.quantity) * price,
+                         'names': [other_out_label(m)], 'et_al': False})
+
+    rows.sort(key=lambda r: r['order'])
+
+    bal_qty, bal_cost = opening_qty, opening_cost
+    for r in rows:
+        r['cost'] = r['cost'].quantize(cent)
+        if r['kind'] == 'in':
+            bal_qty  += r['qty']
+            bal_cost += r['cost']
+        else:
+            bal_qty  -= r['qty']
+            bal_cost -= r['cost']
+        if bal_qty == 0:
+            bal_cost = zero
+        ref = '\n'.join(r['names'])
+        if r['et_al']:
+            ref += '; et al'
+        r['ref']       = ref
+        r['bal_qty']   = bal_qty
+        r['bal_cost']  = bal_cost
+        r['in_qty']    = r['qty']  if r['kind'] == 'in' else ''
+        r['in_unit']   = r['unit'] if r['kind'] == 'in' else ''
+        r['in_total']  = r['cost'] if r['kind'] == 'in' else ''
+        r['out_qty']   = r['qty']  if r['kind'] == 'out' else ''
+        r['out_total'] = r['cost'] if r['kind'] == 'out' else ''
+
+    # Each page: 1 "Balance Forwarded" row + data rows + blanks + 1 "Balance Carried Forward" row
+    cap    = rows_per_page - 2
+    chunks = [rows[i:i + cap] for i in range(0, len(rows), cap)] or [[]]
+    pages, fq, fc = [], opening_qty, opening_cost
+    for n, chunk in enumerate(chunks, 1):
+        cq, cc = (chunk[-1]['bal_qty'], chunk[-1]['bal_cost']) if chunk else (fq, fc)
+        pages.append({'number': n, 'total': len(chunks),
+                      'fwd_qty': fq, 'fwd_cost': fc,
+                      'rows': chunk, 'blank_rows': range(max(cap - len(chunk), 0)),
+                      'cf_qty': cq, 'cf_cost': cc})
+        fq, fc = cq, cc
+
+    desc = ' '.join(p for p in (med.generic_name, med.strength, med.get_dosage_form_display()) if p)
+    if med.brand_name:
+        desc += f' ({med.brand_name})'
+    return {
+        'med': med, 'pages': pages, 'has_events': bool(rows), 'opening': opening_qty,
+        'item': med.medicine_name, 'description': desc,
+        'unit': STOCK_CARD_UNITS.get(med.dosage_form, 'piece'),
+        'stock_no': f'MED-{med.pk:04d}', 'code': med.barcode or '',
+    }
+
+
+def _supplies_ledger_context(request):
+    today     = timezone.localdate()
+    date_from = _parse_iso(request.GET.get('date_from'), today.replace(day=1))
+    date_to   = _parse_iso(request.GET.get('date_to'), today)
+    if date_to < date_from:
+        date_from, date_to = date_to, date_from
+
+    try:
+        rows_per_page = int(request.GET.get('rows', 35))
+    except (TypeError, ValueError):
+        rows_per_page = 35
+    if rows_per_page not in SUPPLIES_LEDGER_ROWS_OPTIONS:
+        rows_per_page = 35
+
+    group = request.GET.get('group', '5')
+    if group not in ('5', '1', '0'):
+        group = '5'
+
+    meds      = Medicine.objects.filter(is_active=True).order_by('medicine_name')
+    med_param = request.GET.get('medicine', '')
+    cards = []
+    if med_param == 'all':
+        for m in meds:
+            c = _supplies_ledger_build(m, date_from, date_to, rows_per_page, group)
+            if c['has_events'] or c['opening']:
+                cards.append(c)
+    elif _to_int(med_param):
+        m = meds.filter(pk=_to_int(med_param)).first()
+        if m:
+            cards.append(_supplies_ledger_build(m, date_from, date_to, rows_per_page, group))
+
+    return {
+        'medicines': meds, 'cards': cards, 'med_param': med_param,
+        'date_from': date_from, 'date_to': date_to,
+        'rows_per_page': rows_per_page, 'rows_options': SUPPLIES_LEDGER_ROWS_OPTIONS,
+        'group': group, 'hospital_name': STOCK_CARD_HOSPITAL,
+    }
+
+
+@require('supplies_ledger')
+def supplies_ledger_report(request):
+    return render(request, 'supplies_ledger.html', _supplies_ledger_context(request))
+
+
+# ── PDF ──────────────────────────────────────────────────────────────────────
+@require('supplies_ledger')
+def supplies_ledger_export_pdf(request):
+    if not REPORTLAB_AVAILABLE:
+        messages.error(request, 'reportlab is not installed. Run: pip install reportlab')
+        return redirect('supplies_ledger_report')
+    from reportlab.platypus import PageBreak
+
+    ctx = _supplies_ledger_context(request)
+    if not ctx['cards']:
+        messages.error(request, 'Select a medicine to generate its Supplies Ledger Card.')
+        return redirect('supplies_ledger_report')
+
+    FOLIO   = (8.5 * inch, 13 * inch)
+    margin  = 0.5 * inch
+    avail_w = FOLIO[0] - 2 * margin
+    black   = colors.black
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=FOLIO, leftMargin=margin, rightMargin=margin,
+                            topMargin=margin, bottomMargin=margin,
+                            title='Supplies Ledger Card', author='MHARSMC ePIS')
+
+    ss     = getSampleStyleSheet()
+    base   = ParagraphStyle('b', parent=ss['Normal'], fontName='Helvetica', fontSize=7.5, leading=9)
+    cell   = ParagraphStyle('c', parent=base, alignment=TA_CENTER)
+    cell_l = ParagraphStyle('cl', parent=base, alignment=TA_LEFT)
+    numst  = ParagraphStyle('n', parent=base, alignment=TA_RIGHT)
+    numb   = ParagraphStyle('nb', parent=numst, fontName='Helvetica-Bold')
+    ital   = ParagraphStyle('i', parent=base, fontName='Helvetica-Oblique', fontSize=8.5, leading=10)
+    head   = ParagraphStyle('h', parent=cell, fontName='Helvetica-Bold', fontSize=8)
+    title  = ParagraphStyle('t', parent=base, fontName='Helvetica-Bold', fontSize=14, leading=17,
+                            alignment=TA_CENTER)
+    meta   = ParagraphStyle('m', parent=base, fontSize=7, leading=9, alignment=TA_CENTER,
+                            textColor=colors.HexColor('#444444'))
+    lab    = ParagraphStyle('lab', parent=base, fontSize=9, leading=11)
+    small  = ParagraphStyle('sm', parent=base, fontSize=8.5, leading=10.5)
+    right  = ParagraphStyle('r', parent=small, alignment=TA_RIGHT)
+
+    def P(text, st=cell):
+        return Paragraph(_xml_escape(str(text)).replace('\n', '<br/>'), st)
+
+    def qty(v):
+        return '' if v == '' else f'{v:,}'
+
+    def money(v):
+        return '' if v == '' else f'{v:,.2f}'
+
+    # Date | Reference | R.Qty | R.Unit | R.Total | I.Qty | I.Total | B.Qty | B.Total
+    fr    = [9, 27, 7, 9, 10, 7, 10, 8, 13]
+    col_w = [avail_w * f / 100 for f in fr]
+
+    story, first = [], True
+    for card in ctx['cards']:
+        for pg in card['pages']:
+            if not first:
+                story.append(PageBreak())
+            first = False
+
+            top = Table([[P('Accounting Form No. 84\nRevised January 1992', small),
+                          Paragraph(f'Stock No.: <u>&nbsp;{_xml_escape(card["stock_no"])}&nbsp;</u>', right)]],
+                        colWidths=[avail_w * 0.6, avail_w * 0.4])
+            top.setStyle(TableStyle([('LEFTPADDING', (0, 0), (-1, -1), 0),
+                                     ('RIGHTPADDING', (0, 0), (-1, -1), 0)]))
+            story += [top, Spacer(1, 4)]
+
+            period = (f'{ctx["hospital_name"]}\n{ctx["date_from"]:%B %d, %Y} – {ctx["date_to"]:%B %d, %Y}'
+                      f'  |  Page {pg["number"]} of {pg["total"]}')
+            data = [
+                [P('SUPPLIES LEDGER CARD', title), '', '', '', '', P(period, meta), '', '', ''],
+                [Paragraph(f'<b>Item</b>&nbsp;&nbsp;{_xml_escape(card["item"])}', lab), '', '', '', '',
+                 Paragraph(f'<b>Code</b>&nbsp;&nbsp;{_xml_escape(card["code"])}', lab), '', '', ''],
+                [Paragraph(f'<b>Description</b>&nbsp;&nbsp;{_xml_escape(card["description"])}', lab), '', '', '', '',
+                 Paragraph(f'<b>Unit</b>&nbsp;&nbsp;{_xml_escape(card["unit"])}', lab), '', '', ''],
+                [P('Date', head), P('Reference', head), P('RECEIPTS', head), '', '',
+                 P('ISSUES', head), '', P('BALANCES', head), ''],
+                ['', '', P('Qty.', head), P('Unit\nCost', head), P('Total\nCost', head),
+                 P('Qty.', head), P('Total\nCost', head), P('Qty.', head), P('Total\nCost', head)],
+                ['', P('Balance Forwarded', ital), '', '', '', '', '',
+                 P(qty(pg['fwd_qty']), numb), P(money(pg['fwd_cost']), numb)],
+            ]
+            for r in pg['rows']:
+                data.append([P(r['date_s']), P(r['ref'], cell_l),
+                             P(qty(r['in_qty']), numst), P(money(r['in_unit']), numst),
+                             P(money(r['in_total']), numst),
+                             P(qty(r['out_qty']), numst), P(money(r['out_total']), numst),
+                             P(qty(r['bal_qty']), numb), P(money(r['bal_cost']), numb)])
+            blanks = len(pg['blank_rows'])
+            data += [[''] * 9 for _ in range(blanks)]
+            data.append([P('Balance Carried Forward', ital), '', '', '', '', '', '',
+                         P(qty(pg['cf_qty']), numb), P(money(pg['cf_cost']), numb)])
+            last = len(data) - 1
+
+            heights = [None] * (6 + len(pg['rows'])) + [0.22 * inch] * blanks + [0.3 * inch]
+            tbl = Table(data, colWidths=col_w, rowHeights=heights)
+            tbl.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.7, black),
+                ('SPAN', (0, 0), (4, 0)), ('SPAN', (5, 0), (8, 0)),
+                ('SPAN', (0, 1), (4, 1)), ('SPAN', (5, 1), (8, 1)),
+                ('SPAN', (0, 2), (4, 2)), ('SPAN', (5, 2), (8, 2)),
+                ('SPAN', (0, 3), (0, 4)), ('SPAN', (1, 3), (1, 4)),
+                ('SPAN', (2, 3), (4, 3)), ('SPAN', (5, 3), (6, 3)), ('SPAN', (7, 3), (8, 3)),
+                ('SPAN', (0, last), (1, last)),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('LEFTPADDING', (0, 0), (-1, -1), 3), ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+                ('TOPPADDING', (0, 0), (-1, 0), 6), ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+            ]))
+            story.append(tbl)
+
+    doc.build(story)
+    resp = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    resp['Content-Disposition'] = (
+        f'attachment; filename="SuppliesLedger_{_stock_card_tag(ctx)}_{ctx["date_from"]}_{ctx["date_to"]}.pdf"')
+    return resp
+
+
+# ── Excel ────────────────────────────────────────────────────────────────────
+@require('supplies_ledger')
+def supplies_ledger_export_excel(request):
+    if not OPENPYXL_AVAILABLE:
+        messages.error(request, 'openpyxl is not installed. Run: pip install openpyxl')
+        return redirect('supplies_ledger_report')
+    from openpyxl.worksheet.pagebreak import Break
+    from openpyxl.worksheet.properties import PageSetupProperties
+
+    ctx = _supplies_ledger_context(request)
+    if not ctx['cards']:
+        messages.error(request, 'Select a medicine to generate its Supplies Ledger Card.')
+        return redirect('supplies_ledger_report')
+
+    thin   = Side(style='thin', color='000000')
+    box    = Border(left=thin, right=thin, top=thin, bottom=thin)
+    f_norm = Font(name='Arial', size=9)
+    f_bold = Font(name='Arial', size=9, bold=True)
+    f_head = Font(name='Arial', size=9, bold=True)
+    f_ttl  = Font(name='Arial', size=14, bold=True)
+    f_ital = Font(name='Arial', size=9, italic=True)
+    f_sml  = Font(name='Arial', size=8, color='555555')
+    ctr = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    lft = Alignment(horizontal='left',   vertical='center', wrap_text=True)
+    rgt = Alignment(horizontal='right',  vertical='center')
+    widths = [11, 34, 9, 11, 13, 9, 13, 9, 14]
+    QTY, MONEY = '#,##0', '#,##0.00'
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    used = set()
+
+    def put(ws, r, c, v, font=f_norm, align=ctr, fmt=None):
+        cell = ws.cell(r, c, v)
+        cell.font, cell.alignment, cell.border = font, align, box
+        if fmt and v != '':
+            cell.number_format = fmt
+        return cell
+
+    for card in ctx['cards']:
+        ws = wb.create_sheet(_xl_sheet_title(card['med'], used))
+        for i, w in enumerate(widths, 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+        ws.page_setup.orientation = 'portrait'
+        ws.page_setup.paperSize   = 14                 # Folio 8.5 x 13 in
+        ws.page_setup.fitToWidth  = 1
+        ws.page_setup.fitToHeight = 0
+        ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+        ws.page_margins.left = ws.page_margins.right = 0.5
+        ws.page_margins.top  = ws.page_margins.bottom = 0.5
+        ws.print_options.horizontalCentered = True
+
+        r = 1
+        for pg in card['pages']:
+            _xl_merge(ws, r, 1, r, 5, 'Accounting Form No. 84\nRevised January 1992', Font(name='Arial', size=9), lft)
+            _xl_merge(ws, r, 6, r, 9, f'Stock No.:  {card["stock_no"]}', f_bold, rgt)
+            ws.row_dimensions[r].height = 28; r += 1
+
+            _xl_merge(ws, r, 1, r, 5, 'SUPPLIES LEDGER CARD', f_ttl, ctr, box)
+            _xl_merge(ws, r, 6, r, 9,
+                      f'{ctx["hospital_name"]}\n{ctx["date_from"]:%B %d, %Y} – {ctx["date_to"]:%B %d, %Y}'
+                      f'  |  Page {pg["number"]} of {pg["total"]}', f_sml, ctr, box)
+            ws.row_dimensions[r].height = 36; r += 1
+
+            _xl_merge(ws, r, 1, r, 5, f'Item:  {card["item"]}', f_bold, lft, box)
+            _xl_merge(ws, r, 6, r, 9, f'Code:  {card["code"]}', f_bold, lft, box)
+            ws.row_dimensions[r].height = 22; r += 1
+            _xl_merge(ws, r, 1, r, 5, f'Description:  {card["description"]}', f_bold, lft, box)
+            _xl_merge(ws, r, 6, r, 9, f'Unit:  {card["unit"]}', f_bold, lft, box)
+            ws.row_dimensions[r].height = 24; r += 1
+
+            # column headers
+            _xl_merge(ws, r, 1, r + 1, 1, 'Date', f_head, ctr, box)
+            _xl_merge(ws, r, 2, r + 1, 2, 'Reference', f_head, ctr, box)
+            _xl_merge(ws, r, 3, r, 5, 'RECEIPTS', f_head, ctr, box)
+            _xl_merge(ws, r, 6, r, 7, 'ISSUES', f_head, ctr, box)
+            _xl_merge(ws, r, 8, r, 9, 'BALANCES', f_head, ctr, box)
+            for c, label in enumerate(['Qty.', 'Unit\nCost', 'Total\nCost', 'Qty.', 'Total\nCost',
+                                       'Qty.', 'Total\nCost'], 3):
+                put(ws, r + 1, c, label, f_head)
+            ws.row_dimensions[r].height = 18
+            ws.row_dimensions[r + 1].height = 30
+            r += 2
+
+            # Balance forwarded
+            for c in range(1, 10):
+                put(ws, r, c, '')
+            put(ws, r, 2, 'Balance Forwarded', f_ital, lft)
+            put(ws, r, 8, pg['fwd_qty'], f_bold, ctr, QTY)
+            put(ws, r, 9, float(pg['fwd_cost']), f_bold, ctr, MONEY)
+            ws.row_dimensions[r].height = 20
+            r += 1
+
+            # data rows
+            for rw in pg['rows']:
+                put(ws, r, 1, rw['date_s'])
+                put(ws, r, 2, rw['ref'], f_norm, lft)
+                put(ws, r, 3, rw['in_qty'], f_norm, ctr, QTY)
+                put(ws, r, 4, float(rw['in_unit']) if rw['in_unit'] != '' else '', f_norm, ctr, MONEY)
+                put(ws, r, 5, float(rw['in_total']) if rw['in_total'] != '' else '', f_norm, ctr, MONEY)
+                put(ws, r, 6, rw['out_qty'], f_norm, ctr, QTY)
+                put(ws, r, 7, float(rw['out_total']) if rw['out_total'] != '' else '', f_norm, ctr, MONEY)
+                put(ws, r, 8, rw['bal_qty'], f_bold, ctr, QTY)
+                put(ws, r, 9, float(rw['bal_cost']), f_bold, ctr, MONEY)
+                ws.row_dimensions[r].height = max(20, 12.5 * _xl_lines(rw['ref'], widths[1]) + 6)
+                r += 1
+            for _ in pg['blank_rows']:
+                for c in range(1, 10):
+                    ws.cell(r, c).border = box
+                ws.row_dimensions[r].height = 18
+                r += 1
+
+            # Balance carried forward
+            for c in range(1, 10):
+                ws.cell(r, c).border = box
+            _xl_merge(ws, r, 1, r, 2, 'Balance Carried Forward', f_ital, lft, box)
+            put(ws, r, 8, pg['cf_qty'], f_bold, ctr, QTY)
+            put(ws, r, 9, float(pg['cf_cost']), f_bold, ctr, MONEY)
+            ws.row_dimensions[r].height = 24
+            r += 1
+
+            ws.row_breaks.append(Break(id=r))          # next card page starts on a new printed page
+            r += 2
+
+    resp = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    resp['Content-Disposition'] = (
+        f'attachment; filename="SuppliesLedger_{_stock_card_tag(ctx)}_{ctx["date_from"]}_{ctx["date_to"]}.xlsx"')
+    wb.save(resp)
+    return resp

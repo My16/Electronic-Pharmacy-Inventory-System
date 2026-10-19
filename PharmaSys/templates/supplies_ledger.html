@@ -1,0 +1,302 @@
+{% extends 'base.html' %}
+{% block title %}Supplies Ledger Card{% endblock %}
+{% block nav_supplies_ledger %}active{% endblock %}
+{% block page_title %}Supplies Ledger Card{% endblock %}
+{% block breadcrumb %}Reports / Supplies Ledger Card{% endblock %}
+
+{% block extra_css %}
+<style>
+  .sl-filter{background:#fff;border-radius:10px;padding:14px 16px;margin-bottom:18px;
+             display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+  .sl-filter label{display:block;font-size:11px;font-weight:600;color:#78909C;margin-bottom:3px}
+  .sl-filter select,.sl-filter input[type=date],.sl-filter input[type=text]{
+      padding:7px 9px;border:1px solid #d5dde5;border-radius:6px;font-size:13px}
+  .sl-btn{padding:8px 16px;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;
+          color:#fff;background:#00ADB5;text-decoration:none;display:inline-block}
+  .sl-btn.dark{background:#0D1B2A} .sl-btn.red{background:#DC2626} .sl-btn.green{background:#16A34A}
+
+  /* searchable medicine box */
+  .sl-combo{position:relative;width:320px}
+  .sl-combo input[type=text]{width:100%;box-sizing:border-box;padding-right:28px}
+  .sl-combo .caret{position:absolute;right:10px;top:50%;transform:translateY(-50%);
+                   font-size:10px;color:#78909C;pointer-events:none}
+  .sl-combo-list{display:none;position:absolute;left:0;right:0;top:100%;margin-top:2px;z-index:50;
+                 background:#fff;border:1px solid #d5dde5;border-radius:6px;max-height:260px;overflow-y:auto;
+                 box-shadow:0 6px 18px rgba(0,0,0,.15)}
+  .sl-combo.open .sl-combo-list{display:block}
+  .sl-opt{padding:7px 10px;font-size:13px;cursor:pointer}
+  .sl-opt:hover,.sl-opt.active{background:#E0F7F8}
+  .sl-opt.hidden{display:none}
+  .sl-noresult{padding:8px 10px;font-size:12px;color:#78909C;display:none}
+
+  /* view toggle */
+  .sl-view{display:inline-flex;border:1px solid #d5dde5;border-radius:6px;overflow:hidden}
+  .sl-view button{border:0;background:#fff;padding:8px 12px;font-size:13px;font-weight:600;
+                  color:#455A64;cursor:pointer}
+  .sl-view button.on{background:#0D1B2A;color:#fff}
+
+  /* pages */
+  .sl-pages.view-1{display:block}
+  .sl-pages.view-2{display:flex;flex-wrap:wrap;justify-content:center;gap:18px;align-items:flex-start}
+  .sl-sheet{background:#fff;width:8.5in;min-height:13in;margin:0 auto 22px;padding:.5in;box-sizing:border-box;
+            box-shadow:0 2px 12px rgba(0,0,0,.15);color:#000;font-family:Arial,Helvetica,sans-serif;
+            zoom:var(--z,1)}
+  .sl-pages.view-2 .sl-sheet{margin:0}
+  .sl-top{display:flex;justify-content:space-between;align-items:flex-end;font-size:11px;margin-bottom:4px}
+  .sl-top .line{display:inline-block;min-width:1.4in;border-bottom:1px solid #000;text-align:center}
+
+  .sl-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:10.5px}
+  .sl-table th,.sl-table td{border:1px solid #000;padding:3px 4px;height:.22in;word-wrap:break-word}
+  .sl-table th{font-weight:700;text-align:center;font-size:11px}
+  .sl-table th.title{font-size:17px;padding:6px 0}
+  .sl-table .meta{font-size:9px;font-weight:400;color:#444;line-height:1.35}
+  .sl-table td.lab{font-size:12px;text-align:left;padding:6px 8px}
+  .sl-table td.c{text-align:center}
+  .sl-table td.n{text-align:right}
+  .sl-table td.ref{text-align:left}
+  .sl-table td.b{font-weight:700}
+  .sl-table td.ital{font-style:italic;font-size:11px}
+  .sl-table tr.cf td{height:.3in}
+  .sl-empty{text-align:center;color:#78909C;padding:50px 0}
+
+  @media print{
+    @page{size:8.5in 13in;margin:.4in}
+    .sidebar,.main-header,.main-footer,.no-print,.alert{display:none !important}
+    .main-wrapper{margin:0 !important;padding:0 !important;width:100% !important}
+    .main-content{padding:0 !important;margin:0 !important}
+    body{background:#fff !important}
+    .sl-pages,.sl-pages.view-1,.sl-pages.view-2{display:block !important}
+    .sl-sheet{zoom:1 !important;width:auto;min-height:0;margin:0 !important;padding:0;
+              box-shadow:none;page-break-after:always}
+    .sl-sheet:last-child{page-break-after:auto}
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<form method="get" class="sl-filter no-print" id="slForm">
+  <div>
+    <label>Medicine <span style="font-weight:400">(type to search)</span></label>
+    <div class="sl-combo" id="medCombo">
+      <input type="text" id="medSearch" placeholder="Search medicine…" autocomplete="off">
+      <i class="fas fa-chevron-down caret"></i>
+      <input type="hidden" name="medicine" id="medValue" value="{{ med_param }}">
+      <div class="sl-combo-list" id="medList">
+        <div class="sl-opt" data-value="all">All medicines (with activity)</div>
+        {% for m in medicines %}
+        <div class="sl-opt" data-value="{{ m.pk }}">{{ m.medicine_name }} {{ m.strength }}</div>
+        {% endfor %}
+        <div class="sl-noresult" id="medNone">No medicine found.</div>
+      </div>
+    </div>
+  </div>
+  <div><label>From</label><input type="date" name="date_from" value="{{ date_from|date:'Y-m-d' }}"></div>
+  <div><label>To</label><input type="date" name="date_to" value="{{ date_to|date:'Y-m-d' }}"></div>
+  <div>
+    <label>Rows per page</label>
+    <select name="rows">
+      {% for n in rows_options %}<option value="{{ n }}" {% if n == rows_per_page %}selected{% endif %}>{{ n }}</option>{% endfor %}
+    </select>
+  </div>
+  <div>
+    <label>Group issues</label>
+    <select name="group">
+      <option value="5" {% if group == '5' %}selected{% endif %}>Every 5 days</option>
+      <option value="1" {% if group == '1' %}selected{% endif %}>Daily</option>
+      <option value="0" {% if group == '0' %}selected{% endif %}>Every transaction</option>
+    </select>
+  </div>
+  <button class="sl-btn" type="submit"><i class="fas fa-magnifying-glass"></i> Generate</button>
+
+  {% if cards %}
+  <div>
+    <label>View</label>
+    <div class="sl-view" id="slView">
+      <button type="button" data-view="1"><i class="fas fa-file"></i> 1 Page</button>
+      <button type="button" data-view="2"><i class="fas fa-table-columns"></i> 2 Pages</button>
+    </div>
+  </div>
+  <button class="sl-btn dark" type="button" onclick="window.print()"><i class="fas fa-print"></i> Print (Folio)</button>
+  <a class="sl-btn red"
+     href="{% url 'supplies_ledger_export_pdf' %}?medicine={{ med_param }}&date_from={{ date_from|date:'Y-m-d' }}&date_to={{ date_to|date:'Y-m-d' }}&rows={{ rows_per_page }}&group={{ group }}">
+     <i class="fas fa-file-pdf"></i> PDF</a>
+  <a class="sl-btn green"
+     href="{% url 'supplies_ledger_export_excel' %}?medicine={{ med_param }}&date_from={{ date_from|date:'Y-m-d' }}&date_to={{ date_to|date:'Y-m-d' }}&rows={{ rows_per_page }}&group={{ group }}">
+     <i class="fas fa-file-excel"></i> Excel</a>
+  {% endif %}
+</form>
+
+<div class="sl-pages view-1" id="slPages">
+{% for card in cards %}
+  {% for pg in card.pages %}
+  <div class="sl-sheet">
+    <div class="sl-top">
+      <div>Accounting Form No. 84<br>Revised January 1992</div>
+      <div>Stock No. <span class="line">{{ card.stock_no }}</span></div>
+    </div>
+
+    <table class="sl-table">
+      <colgroup>
+        <col style="width:9%"><col style="width:27%"><col style="width:7%"><col style="width:9%">
+        <col style="width:10%"><col style="width:7%"><col style="width:10%"><col style="width:8%"><col style="width:13%">
+      </colgroup>
+      <thead>
+        <tr>
+          <th colspan="5" class="title">SUPPLIES LEDGER CARD</th>
+          <th colspan="4" class="meta">{{ hospital_name }}<br>
+            {{ date_from|date:"F d, Y" }} – {{ date_to|date:"F d, Y" }} &nbsp;|&nbsp; Page {{ pg.number }} of {{ pg.total }}</th>
+        </tr>
+        <tr>
+          <td colspan="5" class="lab"><b>Item:</b>&nbsp;&nbsp;{{ card.item }}</td>
+          <td colspan="4" class="lab"><b>Code:</b>&nbsp;&nbsp;{{ card.code }}</td>
+        </tr>
+        <tr>
+          <td colspan="5" class="lab"><b>Description:</b>&nbsp;&nbsp;{{ card.description }}</td>
+          <td colspan="4" class="lab"><b>Unit:</b>&nbsp;&nbsp;{{ card.unit }}</td>
+        </tr>
+        <tr>
+          <th rowspan="2">Date</th>
+          <th rowspan="2">Reference</th>
+          <th colspan="3">RECEIPTS</th>
+          <th colspan="2">ISSUES</th>
+          <th colspan="2">BALANCES</th>
+        </tr>
+        <tr>
+          <th>Qty.</th><th>Unit<br>Cost</th><th>Total<br>Cost</th>
+          <th>Qty.</th><th>Total<br>Cost</th>
+          <th>Qty.</th><th>Total<br>Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td></td><td class="ital">Balance Forwarded</td><td></td><td></td><td></td><td></td><td></td>
+          <td class="n b">{{ pg.fwd_qty|floatformat:"0g" }}</td>
+          <td class="n b">{{ pg.fwd_cost|floatformat:"2g" }}</td>
+        </tr>
+        {% for r in pg.rows %}
+        <tr>
+          <td class="c">{{ r.date_s }}</td>
+          <td class="ref">{{ r.ref|linebreaksbr }}</td>
+          <td class="n">{{ r.in_qty|floatformat:"0g" }}</td>
+          <td class="n">{{ r.in_unit|floatformat:"2g" }}</td>
+          <td class="n">{{ r.in_total|floatformat:"2g" }}</td>
+          <td class="n">{{ r.out_qty|floatformat:"0g" }}</td>
+          <td class="n">{{ r.out_total|floatformat:"2g" }}</td>
+          <td class="n b">{{ r.bal_qty|floatformat:"0g" }}</td>
+          <td class="n b">{{ r.bal_cost|floatformat:"2g" }}</td>
+        </tr>
+        {% endfor %}
+        {% for _ in pg.blank_rows %}
+        <tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+        {% endfor %}
+        <tr class="cf">
+          <td colspan="2" class="ital">Balance Carried Forward</td>
+          <td></td><td></td><td></td><td></td><td></td>
+          <td class="n b">{{ pg.cf_qty|floatformat:"0g" }}</td>
+          <td class="n b">{{ pg.cf_cost|floatformat:"2g" }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+{% empty %}
+  <div class="sl-empty no-print">
+    <i class="fas fa-book" style="font-size:32px;margin-bottom:10px"></i><br>
+    Select a medicine and date range, then click <b>Generate</b>.
+  </div>
+{% endfor %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  /* ───────── searchable medicine box ───────── */
+  var combo  = document.getElementById('medCombo');
+  var input  = document.getElementById('medSearch');
+  var hidden = document.getElementById('medValue');
+  var opts   = Array.prototype.slice.call(combo.querySelectorAll('.sl-opt'));
+  var none   = document.getElementById('medNone');
+  var chosenLabel = '';
+
+  opts.forEach(function (o) {
+    if (o.dataset.value === hidden.value) { chosenLabel = o.textContent.trim(); }
+  });
+  input.value = chosenLabel;
+
+  function filter() {
+    var q = input.value.trim().toLowerCase(), shown = 0;
+    opts.forEach(function (o) {
+      var ok = !q || o.textContent.toLowerCase().indexOf(q) !== -1;
+      o.classList.toggle('hidden', !ok);
+      o.classList.remove('active');
+      if (ok) shown++;
+    });
+    none.style.display = shown ? 'none' : 'block';
+    var first = opts.filter(function (o) { return !o.classList.contains('hidden'); })[0];
+    if (first && q) first.classList.add('active');
+  }
+  function openList()  { combo.classList.add('open'); }
+  function closeList() { combo.classList.remove('open'); }
+  function pick(o) {
+    hidden.value = o.dataset.value;
+    chosenLabel  = o.textContent.trim();
+    input.value  = chosenLabel;
+    closeList();
+  }
+
+  input.addEventListener('focus', function () {
+    input.select(); opts.forEach(function (o) { o.classList.remove('hidden'); });
+    none.style.display = 'none'; openList();
+  });
+  input.addEventListener('input', function () { openList(); filter(); });
+  input.addEventListener('keydown', function (e) {
+    var vis = opts.filter(function (o) { return !o.classList.contains('hidden'); });
+    var idx = vis.findIndex(function (o) { return o.classList.contains('active'); });
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault(); openList();
+      if (!vis.length) return;
+      if (idx >= 0) vis[idx].classList.remove('active');
+      idx = e.key === 'ArrowDown' ? (idx + 1) % vis.length : (idx - 1 + vis.length) % vis.length;
+      vis[idx].classList.add('active'); vis[idx].scrollIntoView({block: 'nearest'});
+    } else if (e.key === 'Enter') {
+      if (combo.classList.contains('open') && vis.length) {
+        e.preventDefault(); pick(idx >= 0 ? vis[idx] : vis[0]);
+      }
+    } else if (e.key === 'Escape') { input.value = chosenLabel; closeList(); }
+  });
+  opts.forEach(function (o) {
+    o.addEventListener('mousedown', function (e) { e.preventDefault(); pick(o); });
+  });
+  document.addEventListener('mousedown', function (e) {
+    if (!combo.contains(e.target)) { input.value = chosenLabel; closeList(); }
+  });
+
+  /* ───────── 1 page / 2 pages view ───────── */
+  var pages = document.getElementById('slPages');
+  var view  = document.getElementById('slView');
+  if (!view) return;
+  var SHEET_PX = 8.5 * 96, GAP = 18, mode = '1';
+  try { mode = localStorage.getItem('suppliesLedgerView') || '1'; } catch (e) {}
+
+  function apply() {
+    var avail = pages.clientWidth || window.innerWidth;
+    var cols  = mode === '2' ? 2 : 1;
+    var z = Math.min(1, (avail - GAP * (cols - 1) - 4) / (SHEET_PX * cols));
+    pages.style.setProperty('--z', Math.max(z, 0.3).toFixed(3));
+    pages.className = 'sl-pages view-' + mode;
+    Array.prototype.forEach.call(view.querySelectorAll('button'), function (b) {
+      b.classList.toggle('on', b.dataset.view === mode);
+    });
+  }
+  view.addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    mode = b.dataset.view;
+    try { localStorage.setItem('suppliesLedgerView', mode); } catch (e2) {}
+    apply();
+  });
+  window.addEventListener('resize', apply);
+  apply();
+})();
+</script>
+{% endblock %}

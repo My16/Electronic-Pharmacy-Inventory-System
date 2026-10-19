@@ -1,0 +1,281 @@
+{% extends 'base.html' %}
+{% block title %}Stock Card{% endblock %}
+{% block nav_stock_card %}active{% endblock %}
+{% block page_title %}Stock Card{% endblock %}
+{% block breadcrumb %}Reports / Stock Card{% endblock %}
+
+{% block extra_css %}
+<style>
+  .sc-filter{background:#fff;border-radius:10px;padding:14px 16px;margin-bottom:18px;
+             display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+  .sc-filter label{display:block;font-size:11px;font-weight:600;color:#78909C;margin-bottom:3px}
+  .sc-filter select,.sc-filter input[type=date],.sc-filter input[type=text]{
+      padding:7px 9px;border:1px solid #d5dde5;border-radius:6px;font-size:13px}
+  .sc-btn{padding:8px 16px;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;
+          color:#fff;background:#00ADB5;text-decoration:none;display:inline-block}
+  .sc-btn.dark{background:#0D1B2A} .sc-btn.red{background:#DC2626} .sc-btn.green{background:#16A34A}
+
+  /* ── searchable medicine box ── */
+  .sc-combo{position:relative;width:320px}
+  .sc-combo input[type=text]{width:100%;box-sizing:border-box;padding-right:28px}
+  .sc-combo .caret{position:absolute;right:10px;top:50%;transform:translateY(-50%);
+                   font-size:10px;color:#78909C;pointer-events:none}
+  .sc-combo-list{display:none;position:absolute;left:0;right:0;top:100%;margin-top:2px;z-index:50;
+                 background:#fff;border:1px solid #d5dde5;border-radius:6px;max-height:260px;overflow-y:auto;
+                 box-shadow:0 6px 18px rgba(0,0,0,.15)}
+  .sc-combo.open .sc-combo-list{display:block}
+  .sc-opt{padding:7px 10px;font-size:13px;cursor:pointer}
+  .sc-opt:hover,.sc-opt.active{background:#E0F7F8}
+  .sc-opt.hidden{display:none}
+  .sc-noresult{padding:8px 10px;font-size:12px;color:#78909C;display:none}
+
+  /* ── view toggle ── */
+  .sc-view{display:inline-flex;border:1px solid #d5dde5;border-radius:6px;overflow:hidden}
+  .sc-view button{border:0;background:#fff;padding:8px 12px;font-size:13px;font-weight:600;
+                  color:#455A64;cursor:pointer}
+  .sc-view button.on{background:#0D1B2A;color:#fff}
+
+  /* ── pages ── */
+  .sc-pages.view-1{display:block}
+  .sc-pages.view-2{display:flex;flex-wrap:wrap;justify-content:center;gap:18px;align-items:flex-start}
+  .sc-sheet{background:#fff;width:8.5in;min-height:13in;margin:0 auto 22px;padding:.5in;box-sizing:border-box;
+            box-shadow:0 2px 12px rgba(0,0,0,.15);color:#000;font-family:Arial,Helvetica,sans-serif;
+            zoom:var(--z,1)}
+  .sc-pages.view-2 .sc-sheet{margin:0}
+  .sc-appendix{text-align:right;font-size:12px;margin-bottom:4px}
+  .sc-box{border:1.5px solid #000;text-align:center;padding:6px 0}
+  .sc-hosp{font-size:17px;font-weight:700;text-decoration:underline}
+  .sc-title{font-size:15px;font-weight:700;margin-top:2px}
+  .sc-period{font-size:11px;color:#444;margin-top:2px}
+  .sc-info{width:100%;border-collapse:collapse;font-size:12px}
+  .sc-info td{border:1.5px solid #000;border-top:0;padding:8px}
+  .sc-ledger{width:100%;border-collapse:collapse;table-layout:fixed;font-size:11px}
+  .sc-ledger th,.sc-ledger td{border:1px solid #000;padding:3px 5px;text-align:center;height:.26in;word-wrap:break-word}
+  .sc-ledger th{font-weight:700;font-size:11.5px}
+  .sc-ledger td.ref{text-align:left}
+  .sc-ledger td.price{text-align:left;color:#C00000}
+  .sc-ledger td.bal{font-weight:700}
+  .sc-empty{text-align:center;color:#78909C;padding:50px 0}
+
+  @media print{
+    @page{size:8.5in 13in;margin:.4in}
+    .sidebar,.main-header,.main-footer,.no-print,.alert{display:none !important}
+    .main-wrapper{margin:0 !important;padding:0 !important;width:100% !important}
+    .main-content{padding:0 !important;margin:0 !important}
+    body{background:#fff !important}
+    .sc-pages,.sc-pages.view-1,.sc-pages.view-2{display:block !important}
+    .sc-sheet{zoom:1 !important;width:auto;min-height:0;margin:0 !important;padding:0;
+              box-shadow:none;page-break-after:always}
+    .sc-sheet:last-child{page-break-after:auto}
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<form method="get" class="sc-filter no-print" id="scForm">
+  <div>
+    <label>Medicine <span style="font-weight:400">(type to search)</span></label>
+    <div class="sc-combo" id="medCombo">
+      <input type="text" id="medSearch" placeholder="Search medicine…" autocomplete="off">
+      <i class="fas fa-chevron-down caret"></i>
+      <input type="hidden" name="medicine" id="medValue" value="{{ med_param }}">
+      <div class="sc-combo-list" id="medList">
+        <div class="sc-opt" data-value="all">All medicines (with activity)</div>
+        {% for m in medicines %}
+        <div class="sc-opt" data-value="{{ m.pk }}">{{ m.medicine_name }} {{ m.strength }}</div>
+        {% endfor %}
+        <div class="sc-noresult" id="medNone">No medicine found.</div>
+      </div>
+    </div>
+  </div>
+  <div><label>From</label><input type="date" name="date_from" value="{{ date_from|date:'Y-m-d' }}"></div>
+  <div><label>To</label><input type="date" name="date_to" value="{{ date_to|date:'Y-m-d' }}"></div>
+  <div>
+    <label>Rows per page</label>
+    <select name="rows">
+      {% for n in rows_options %}<option value="{{ n }}" {% if n == rows_per_page %}selected{% endif %}>{{ n }}</option>{% endfor %}
+    </select>
+  </div>
+  <button class="sc-btn" type="submit"><i class="fas fa-magnifying-glass"></i> Generate</button>
+
+  {% if cards %}
+  <div>
+    <label>View</label>
+    <div class="sc-view" id="scView">
+      <button type="button" data-view="1"><i class="fas fa-file"></i> 1 Page</button>
+      <button type="button" data-view="2"><i class="fas fa-table-columns"></i> 2 Pages</button>
+    </div>
+  </div>
+  <button class="sc-btn dark" type="button" onclick="window.print()"><i class="fas fa-print"></i> Print (Folio)</button>
+  <a class="sc-btn red"
+     href="{% url 'stock_card_export_pdf' %}?medicine={{ med_param }}&date_from={{ date_from|date:'Y-m-d' }}&date_to={{ date_to|date:'Y-m-d' }}&rows={{ rows_per_page }}">
+     <i class="fas fa-file-pdf"></i> PDF</a>
+  <a class="sc-btn green"
+     href="{% url 'stock_card_export_excel' %}?medicine={{ med_param }}&date_from={{ date_from|date:'Y-m-d' }}&date_to={{ date_to|date:'Y-m-d' }}&rows={{ rows_per_page }}">
+     <i class="fas fa-file-excel"></i> Excel</a>
+  {% endif %}
+</form>
+
+<div class="sc-pages view-1" id="scPages">
+{% for card in cards %}
+  {% for pg in card.pages %}
+  <div class="sc-sheet">
+    <div class="sc-appendix">Appendix 127</div>
+
+    <div class="sc-box">
+      <div class="sc-hosp">{{ hospital_name }}</div>
+      <div class="sc-title">STOCK CARD</div>
+      <div class="sc-period">{{ date_from|date:"F d, Y" }} – {{ date_to|date:"F d, Y" }} &nbsp;|&nbsp; Page {{ pg.number }} of {{ pg.total }}</div>
+    </div>
+
+    <table class="sc-info">
+      <tr>
+        <td style="width:62%"><b>ITEM / DESCRIPTION:</b> {{ card.description }}</td>
+        <td><b>STOCK NO.:</b> {{ card.stock_no }}</td>
+      </tr>
+      <tr>
+        <td><b>UNIT:</b> {{ card.unit }}</td>
+        <td><b>RE-ORDER POINT:</b> {{ card.reorder }}</td>
+      </tr>
+    </table>
+
+    <table class="sc-ledger">
+      <colgroup>
+        <col style="width:12%"><col style="width:34%"><col style="width:12%">
+        <col style="width:14%"><col style="width:14%"><col style="width:14%">
+      </colgroup>
+      <thead>
+        <tr>
+          <th rowspan="2">Date</th>
+          <th rowspan="2">Reference</th>
+          <th colspan="2">Receipt</th>
+          <th>Issuance</th>
+          <th rowspan="2">Balance</th>
+        </tr>
+        <tr>
+          <th>Qty</th><th>Expiration<br>Date</th><th>Qty</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td></td><td class="price">Price: {{ card.price }}</td><td></td><td></td><td></td>
+          <td class="bal">{{ pg.forwarded }}</td>
+        </tr>
+        {% for r in pg.rows %}
+        <tr>
+          <td>{{ r.date_s }}</td>
+          <td class="ref">{{ r.ref|linebreaksbr }}</td>
+          <td>{{ r.in_qty }}</td>
+          <td>{{ r.exp_s }}</td>
+          <td>{{ r.out_qty }}</td>
+          <td class="bal">{{ r.balance }}</td>
+        </tr>
+        {% endfor %}
+        {% for _ in pg.blank_rows %}
+        <tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+{% empty %}
+  <div class="sc-empty no-print">
+    <i class="fas fa-table-list" style="font-size:32px;margin-bottom:10px"></i><br>
+    Select a medicine and date range, then click <b>Generate</b>.
+  </div>
+{% endfor %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  /* ───────── searchable medicine box ───────── */
+  var combo  = document.getElementById('medCombo');
+  var input  = document.getElementById('medSearch');
+  var hidden = document.getElementById('medValue');
+  var opts   = Array.prototype.slice.call(combo.querySelectorAll('.sc-opt'));
+  var none   = document.getElementById('medNone');
+  var chosenLabel = '';
+
+  opts.forEach(function (o) {
+    if (o.dataset.value === hidden.value) { chosenLabel = o.textContent.trim(); }
+  });
+  input.value = chosenLabel;
+
+  function filter() {
+    var q = input.value.trim().toLowerCase(), shown = 0;
+    opts.forEach(function (o) {
+      var ok = !q || o.textContent.toLowerCase().indexOf(q) !== -1;
+      o.classList.toggle('hidden', !ok);
+      o.classList.remove('active');
+      if (ok) shown++;
+    });
+    none.style.display = shown ? 'none' : 'block';
+    var first = opts.filter(function (o) { return !o.classList.contains('hidden'); })[0];
+    if (first && q) first.classList.add('active');
+  }
+  function openList()  { combo.classList.add('open'); }
+  function closeList() { combo.classList.remove('open'); }
+  function pick(o) {
+    hidden.value = o.dataset.value;
+    chosenLabel  = o.textContent.trim();
+    input.value  = chosenLabel;
+    closeList();
+  }
+
+  input.addEventListener('focus', function () {
+    input.select(); opts.forEach(function (o) { o.classList.remove('hidden'); });
+    none.style.display = 'none'; openList();
+  });
+  input.addEventListener('input', function () { openList(); filter(); });
+  input.addEventListener('keydown', function (e) {
+    var vis = opts.filter(function (o) { return !o.classList.contains('hidden'); });
+    var idx = vis.findIndex(function (o) { return o.classList.contains('active'); });
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault(); openList();
+      if (!vis.length) return;
+      if (idx >= 0) vis[idx].classList.remove('active');
+      idx = e.key === 'ArrowDown' ? (idx + 1) % vis.length : (idx - 1 + vis.length) % vis.length;
+      vis[idx].classList.add('active'); vis[idx].scrollIntoView({block: 'nearest'});
+    } else if (e.key === 'Enter') {
+      if (combo.classList.contains('open') && vis.length) {
+        e.preventDefault(); pick(idx >= 0 ? vis[idx] : vis[0]);
+      }
+    } else if (e.key === 'Escape') { input.value = chosenLabel; closeList(); }
+  });
+  opts.forEach(function (o) {
+    o.addEventListener('mousedown', function (e) { e.preventDefault(); pick(o); });
+  });
+  document.addEventListener('mousedown', function (e) {
+    if (!combo.contains(e.target)) { input.value = chosenLabel; closeList(); }
+  });
+
+  /* ───────── 1 page / 2 pages view ───────── */
+  var pages = document.getElementById('scPages');
+  var view  = document.getElementById('scView');
+  if (!view) return;
+  var SHEET_PX = 8.5 * 96, GAP = 18, mode = '1';
+  try { mode = localStorage.getItem('stockCardView') || '1'; } catch (e) {}
+
+  function apply() {
+    var avail = pages.clientWidth || window.innerWidth;
+    var cols  = mode === '2' ? 2 : 1;
+    var z = Math.min(1, (avail - GAP * (cols - 1) - 4) / (SHEET_PX * cols));
+    pages.style.setProperty('--z', Math.max(z, 0.3).toFixed(3));
+    pages.className = 'sc-pages view-' + mode;
+    Array.prototype.forEach.call(view.querySelectorAll('button'), function (b) {
+      b.classList.toggle('on', b.dataset.view === mode);
+    });
+  }
+  view.addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    mode = b.dataset.view;
+    try { localStorage.setItem('stockCardView', mode); } catch (e2) {}
+    apply();
+  });
+  window.addEventListener('resize', apply);
+  apply();
+})();
+</script>
+{% endblock %}

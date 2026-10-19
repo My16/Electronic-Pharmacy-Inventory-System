@@ -122,7 +122,7 @@
         {% endif %}
 
         <!-- REPORTS -->
-        {% if perm.reports or perm.consumption_report or perm.pdea_register %}
+        {% if perm.reports or perm.consumption_report or perm.pdea_register or perm.stock_card or perm.supplies_ledger %}
         <span class="nav-section-label">Reports</span>
         {% endif %}
 
@@ -150,6 +150,25 @@
            data-tooltip="PDEA S2 Register">
             <i class="fas fa-book-medical"></i>
             <span class="nav-label">PDEA S2 Register</span>
+        </a>
+        {% endif %}
+
+        {% if perm.reports %}
+        <a href="{% url 'stock_card_report' %}"
+           class="nav-item {% block nav_stock_card %}{% endblock %}"
+           data-tooltip="Stock Card">
+            <i class="fas fa-table-list"></i>
+            <span class="nav-label">Stock Card</span>
+        </a>
+        {% endif %}
+
+
+        {% if perm.supplies_ledger %}
+        <a href="{% url 'supplies_ledger_report' %}"
+           class="nav-item {% block nav_supplies_ledger %}{% endblock %}"
+           data-tooltip="Supplies Ledger Card">
+            <i class="fas fa-book"></i>
+            <span class="nav-label">Supplies Ledger Card</span>
         </a>
         {% endif %}
 

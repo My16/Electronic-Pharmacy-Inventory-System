@@ -48,6 +48,8 @@ class UserPermission(models.Model):
     consumption_report = models.BooleanField(default=False)
     returns            = models.BooleanField(default=False)
     pdea_register      = models.BooleanField(default=False)
+    stock_card         = models.BooleanField(default=False)
+    supplies_ledger    = models.BooleanField(default=False)
 
     MODULE_CHOICES = [
         ("inventory",          "Medicine Inventory"),
@@ -61,6 +63,8 @@ class UserPermission(models.Model):
         ("consumption_report", "Consumption Report"),
         ("returns",            "Returns Management"),
         ("pdea_register",      "PDEA S2 Register"),
+        ("stock_card",         "Stock Card"),
+        ("supplies_ledger",    "Supplies Ledger"),
     ]
 
     @classmethod
