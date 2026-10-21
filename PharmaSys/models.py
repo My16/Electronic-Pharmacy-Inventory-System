@@ -5,6 +5,7 @@ from django.utils import timezone
 from django.db.models import Sum
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from django.db.models import Sum, Q
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -306,6 +307,26 @@ class StorageLocation(models.Model):
     w          = models.FloatField(default=16)
     h          = models.FloatField(default=12)
     notes      = models.TextField(blank=True)
+
+    LOCK_REASON_CHOICES = [
+        ('count',       'Physical Count / Inventory Audit'),
+        ('quarantine',  'Quarantine / Under Investigation'),
+        ('recall',      'Product Recall'),
+        ('temperature', 'Temperature Excursion'),
+        ('maintenance', 'Maintenance / Repair / Pest Control'),
+        ('inspection',  'Inspection (FDA / PDEA / Internal)'),
+        ('other',       'Other'),
+    ]
+    is_locked   = models.BooleanField(default=False, db_index=True)
+    lock_reason = models.CharField(max_length=20, choices=LOCK_REASON_CHOICES, blank=True)
+    lock_notes  = models.TextField(blank=True)
+    locked_at   = models.DateTimeField(null=True, blank=True)
+    locked_by   = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='locked_locations')
+    is_supply_office = models.BooleanField(
+        default=False, db_index=True,
+        help_text='Supply Office storage: receives stock but is never counted in pharmacy stock')
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -374,7 +395,23 @@ class Medicine(models.Model):
     # ── Aggregated stock across all batches ───────────────────
     @property
     def stock_quantity(self):
-        result = self.batches.filter(do_not_release=False, quantity__gt=0).aggregate(total=Sum('quantity'))
+        result = self.batches.releasable().aggregate(total=Sum('quantity'))
+        return result['total'] or 0
+
+    @property
+    def locked_quantity(self):
+        """Units held in locked locations (excluded from stock_quantity)."""
+        result = (self.batches.in_locked_location()
+                  .filter(do_not_release=False, quantity__gt=0)
+                  .aggregate(total=Sum('quantity')))
+        return result['total'] or 0
+
+    @property
+    def supply_office_quantity(self):
+        """Units held in Supply Office locations (not part of pharmacy stock)."""
+        result = (self.batches.in_supply_office()
+                  .filter(do_not_release=False, quantity__gt=0)
+                  .aggregate(total=Sum('quantity')))
         return result['total'] or 0
 
     @property
@@ -387,11 +424,8 @@ class Medicine(models.Model):
 
     @property
     def is_expiring_soon(self):
-        """True if the earliest-expiring active batch expires within 90 days."""
         threshold = timezone.now().date() + timezone.timedelta(days=90)
-        return self.batches.filter(
-            do_not_release=False,
-            quantity__gt=0,
+        return self.batches.releasable().filter(
             expiry_date__isnull=False,
             expiry_date__lte=threshold,
             expiry_date__gte=timezone.now().date(),
@@ -399,21 +433,15 @@ class Medicine(models.Model):
 
     @property
     def is_expired(self):
-        """True if any active batch is expired."""
-        return self.batches.filter(
-            do_not_release=False,
-            quantity__gt=0,
+        return self.batches.releasable().filter(
             expiry_date__isnull=False,
             expiry_date__lt=timezone.now().date(),
         ).exists()
 
     @property
     def earliest_expiry(self):
-        """The soonest expiry date among active batches, or None."""
-        batch = self.batches.filter(
-            do_not_release=False,
-            quantity__gt=0, expiry_date__isnull=False
-        ).order_by('expiry_date').first()
+        batch = self.batches.releasable().filter(
+            expiry_date__isnull=False).order_by('expiry_date').first()
         return batch.expiry_date if batch else None
 
     @property
@@ -427,12 +455,37 @@ class Medicine(models.Model):
     # Legacy shim so old code that reads medicine.purchase_price still works
     @property
     def purchase_price(self):
-        batch = self.batches.filter(do_not_release=False, quantity__gt=0).order_by('expiry_date').first()
+        batch = self.batches.releasable().order_by('expiry_date').first()
         return batch.purchase_price if batch else 0
 
     class Meta:
         ordering = ['medicine_name']
         verbose_name_plural = 'Medicines'
+
+
+class MedicineStockQuerySet(models.QuerySet):
+    @staticmethod
+    def _locked_q():
+        return (Q(location__is_locked=True) |
+                Q(location__isnull=True, medicine__location__is_locked=True))
+
+    @staticmethod
+    def _supply_q():
+        return (Q(location__is_supply_office=True) |
+                Q(location__isnull=True, medicine__location__is_supply_office=True))
+
+    def in_locked_location(self):
+        """Pharmacy stock frozen by a lock (Supply Office stock is reported separately)."""
+        return self.filter(self._locked_q()).exclude(self._supply_q())
+
+    def in_supply_office(self):
+        return self.filter(self._supply_q())
+
+    def releasable(self):
+        """Batches that may be dispensed / counted as pharmacy stock."""
+        return (self.filter(do_not_release=False, quantity__gt=0)
+                    .exclude(self._locked_q())
+                    .exclude(self._supply_q()))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -505,6 +558,22 @@ class MedicineStock(models.Model):
         verbose_name        = 'Medicine Stock (Batch)'
         verbose_name_plural = 'Medicine Stock (Batches)'
 
+    objects = MedicineStockQuerySet.as_manager()
+
+    @property
+    def effective_location(self):
+        return self.location or self.medicine.location
+
+    @property
+    def is_locked(self):
+        loc = self.effective_location
+        return bool(loc and loc.is_locked)
+
+    @property
+    def is_supply_office(self):
+        loc = self.effective_location
+        return bool(loc and loc.is_supply_office)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STOCK MOVEMENT  (audit log — unchanged)
@@ -520,6 +589,7 @@ class StockMovement(models.Model):
         ('damaged',  'Damaged / Disposal'),
         ('audit',    'Audit Adjustment'),
         ('transfer', 'Location Transfer'),
+        ('so_in',    'Supply Office Receipt'),
     ]
 
     medicine        = models.ForeignKey(

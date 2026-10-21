@@ -90,7 +90,6 @@ import math
 from xml.sax.saxutils import escape as _xml_escape
 
 
-
 def _deduct_fefo(medicine, qty_needed, performed_by,
                  movement_type='out', dispensed_to='',
                  prescription_no='', notes='', reference_no=''):
@@ -102,18 +101,16 @@ def _deduct_fefo(medicine, qty_needed, performed_by,
     """
     total_available = medicine.stock_quantity
     if qty_needed > total_available:
+        locked = medicine.locked_quantity
+        extra  = f' ({locked} more unit(s) are in a locked location.)' if locked else ''
         raise ValueError(
             f'Insufficient stock for "{medicine.medicine_name}". '
-            f'Available: {total_available}.'
+            f'Available: {total_available}.{extra}'
         )
 
-    # Batches ordered: soonest expiry first, then no-expiry batches, then oldest received
     batches = list(
-        medicine.batches.filter(quantity__gt=0, do_not_release=False)
-        .order_by(
-            F('expiry_date').asc(nulls_last=True),
-            'received_at'
-        )
+        medicine.batches.releasable()
+        .order_by(F('expiry_date').asc(nulls_last=True), 'received_at')
     )
 
     remaining = qty_needed
@@ -225,16 +222,9 @@ def dashboard_view(request):
     active_medicines = Medicine.objects.filter(is_active=True)
     total_medicines  = active_medicines.count()
 
-    # Low / out counts use annotated total stock per medicine
-    med_with_stock = active_medicines.annotate(
-        total_stock=Sum('batches__quantity')
-    )
-    low_stock_count    = med_with_stock.filter(
-                             total_stock__gt=0,
-                             total_stock__lte=F('reorder_level')).count()
-    out_of_stock_count = med_with_stock.filter(
-                             total_stock__isnull=True).count() + \
-                         med_with_stock.filter(total_stock=0).count()
+    _meds = list(active_medicines)
+    low_stock_count    = sum(1 for m in _meds if m.is_low_stock)
+    out_of_stock_count = sum(1 for m in _meds if m.is_out_of_stock)
 
     expiring_soon_count = MedicineStock.objects.filter(
                               medicine__is_active=True,
@@ -356,6 +346,22 @@ def _attach_locations(meds):
         m.loc_list = items
 
 
+def _held_split(m):
+    """(locked_units, supply_office_units) from the prefetched batches. DNR batches are excluded."""
+    locked = so = 0
+    for b in m.batches.all():
+        if b.quantity <= 0 or b.do_not_release:
+            continue
+        loc = b.location if b.location_id else m.location
+        if not loc:
+            continue
+        if loc.is_supply_office:
+            so += b.quantity
+        elif loc.is_locked:
+            locked += b.quantity
+    return locked, so
+
+
 @require('inventory')
 def inventory_view(request):
     today            = timezone.now().date()
@@ -392,7 +398,7 @@ def inventory_view(request):
         medicines_qs = medicines_qs.filter(dosage_form=dosage_filter)
 
     # Status filters require Python-level evaluation because stock_quantity is a property
-    if status_filter in ('low_stock', 'out_of_stock', 'expiring', 'expired', 'dnr'):
+    if status_filter in ('low_stock', 'out_of_stock', 'expiring', 'expired', 'dnr', 'locked', 'supply_office'):
         all_meds = list(medicines_qs)
         if status_filter == 'low_stock':
             medicines_qs = [m for m in all_meds if m.is_low_stock]
@@ -405,6 +411,10 @@ def inventory_view(request):
         elif status_filter == 'dnr':
             medicines_qs = [m for m in all_meds
                             if any(b.do_not_release and b.quantity > 0 for b in m.batches.all())]
+        elif status_filter == 'locked':
+            medicines_qs = [m for m in all_meds if _held_split(m)[0] > 0]
+        elif status_filter == 'supply_office':
+            medicines_qs = [m for m in all_meds if _held_split(m)[1] > 0]
 
     if highlight_pk:
         try:
@@ -426,13 +436,19 @@ def inventory_view(request):
     for m in rows:
         held = [b for b in m.batches.all() if b.do_not_release and b.quantity > 0]   # already prefetched
         m.dnr_qty   = sum(b.quantity for b in held)
+        m.locked_qty, m.so_qty = _held_split(m)
         m.dnr_count = len(held)
 
     # Alert panel items
-    all_active = list(Medicine.objects.filter(is_active=True).prefetch_related('batches'))
+    all_active = list(
+        Medicine.objects.filter(is_active=True).select_related('location')
+        .prefetch_related(Prefetch('batches', queryset=MedicineStock.objects.select_related('location')))
+    )
     low_stock_items   = sorted([m for m in all_active if m.is_low_stock],
                                 key=lambda m: m.stock_quantity)[:10]
     out_of_stock_items = [m for m in all_active if m.is_out_of_stock][:10]
+    for m in low_stock_items + out_of_stock_items:
+        m.locked_qty, m.so_qty = _held_split(m)
 
     expiring_batches = MedicineStock.objects.filter(
         medicine__is_active=True,
@@ -478,14 +494,25 @@ def inventory_view(request):
 @require('inventory', 'edit')
 def inventory_add_view(request):
     """
-    Adds a new Medicine product. The initial stock (if any) creates a
-    MedicineStock batch and a StockMovement record.
+    Adds a new Medicine product. A storage location is required. The initial
+    stock (if any) lands in that location; a Supply Office location is allowed
+    and is logged as 'so_in' (not counted in pharmacy stock).
     """
     if request.method == 'POST':
         try:
             barcode = request.POST.get('barcode', '').strip() or None
             if barcode and Medicine.objects.filter(barcode=barcode).exists():
                 messages.error(request, f'Barcode "{barcode}" already exists.')
+                return redirect('inventory')
+
+            loc = StorageLocation.objects.filter(
+                pk=_to_int(request.POST.get('location')),
+                kind=StorageLocation.KIND_SHELF).first()
+            if not loc:
+                messages.error(request, 'Please select a storage location.')
+                return redirect('inventory')
+            if loc.is_locked:
+                messages.error(request, f'Location "{loc.code}" is locked. Unlock it or pick another.')
                 return redirect('inventory')
 
             medicine = Medicine.objects.create(
@@ -500,14 +527,15 @@ def inventory_add_view(request):
                 barcode          = barcode,
                 selling_price    = request.POST.get('selling_price') or 0,
                 reorder_level    = int(request.POST.get('reorder_level') or 10),
-                location_id      = request.POST.get('location') or None,
+                location         = loc,
                 is_s2_regulated  = request.POST.get('is_s2_regulated') == '1',
                 created_by       = request.user,
             )
 
-            # If initial stock provided, create the first batch
             init_qty = int(request.POST.get('stock_quantity') or 0)
+            to_so = False
             if init_qty > 0:
+                to_so = loc.is_supply_office
                 batch = MedicineStock.objects.create(
                     medicine       = medicine,
                     batch_number   = request.POST.get('batch_number', '').strip(),
@@ -515,20 +543,28 @@ def inventory_add_view(request):
                     quantity       = init_qty,
                     purchase_price = request.POST.get('purchase_price') or 0,
                     supplier_id    = request.POST.get('supplier') or None,
+                    location       = loc,
                     created_by     = request.user,
                 )
                 StockMovement.objects.create(
                     medicine=medicine, batch=batch,
-                    movement_type='in',
+                    movement_type='so_in' if to_so else 'in',
                     quantity=init_qty,
-                    quantity_before=0, quantity_after=init_qty,
+                    quantity_before=0,
+                    quantity_after=medicine.stock_quantity,   # stays 0 for Supply Office
                     batch_number=batch.batch_number,
                     expiry_date=batch.expiry_date,
                     purchase_price=batch.purchase_price,
-                    notes='Initial stock entry',
+                    notes='Initial stock entry' + (f' (Supply Office {loc.code})' if to_so else ''),
                     performed_by=request.user,
                 )
-            messages.success(request, f'Medicine "{medicine.medicine_name}" added successfully.')
+
+            if to_so:
+                messages.success(request,
+                    f'Medicine "{medicine.medicine_name}" added. {init_qty} unit(s) placed in '
+                    f'Supply Office ({loc.code}); not counted in pharmacy stock.')
+            else:
+                messages.success(request, f'Medicine "{medicine.medicine_name}" added successfully.')
         except Exception as e:
             messages.error(request, f'Error adding medicine: {e}')
     return redirect('inventory')
@@ -537,7 +573,7 @@ def inventory_add_view(request):
 @require('inventory', 'edit')
 def inventory_edit_view(request, pk):
     """
-    Edits product-level fields only (name, dosage, price, reorder level, etc.).
+    Edits product-level fields. A storage location is required.
     Batch details are managed via Stock In / Stock Management.
     """
     medicine = get_object_or_404(Medicine, pk=pk)
@@ -547,6 +583,29 @@ def inventory_edit_view(request, pk):
             if barcode and Medicine.objects.filter(barcode=barcode).exclude(pk=pk).exists():
                 messages.error(request, f'Barcode "{barcode}" already assigned.')
                 return redirect('inventory')
+
+            loc = StorageLocation.objects.filter(
+                pk=_to_int(request.POST.get('location')),
+                kind=StorageLocation.KIND_SHELF).first()
+            if not loc:
+                messages.error(request, 'Please select a storage location.')
+                return redirect('inventory')
+            if loc.is_locked and loc.pk != medicine.location_id:   # keeping current location is fine
+                messages.error(request, f'Location "{loc.code}" is locked. Unlock it or choose another.')
+                return redirect('inventory')
+
+            # Batches with no location of their own follow the main location, so changing it
+            # across the Supply Office boundary would silently change pharmacy stock.
+            old = medicine.location
+            if loc.pk != medicine.location_id and old is not None \
+                    and bool(old.is_supply_office) != bool(loc.is_supply_office):
+                floating = medicine.batches.filter(location__isnull=True, quantity__gt=0).exists()
+                if floating:
+                    messages.error(request,
+                        f'Some batches of "{medicine.medicine_name}" have no location of their own and '
+                        f'follow the main location. Move them with Storage Locations → Transfer (or Edit '
+                        f'Batch) before switching between the pharmacy and a Supply Office.')
+                    return redirect('inventory')
 
             medicine.medicine_name    = request.POST.get('medicine_name', '').strip()
             medicine.generic_name     = request.POST.get('generic_name', '').strip()
@@ -559,7 +618,7 @@ def inventory_edit_view(request, pk):
             medicine.barcode          = barcode
             medicine.selling_price    = request.POST.get('selling_price') or 0
             medicine.reorder_level    = int(request.POST.get('reorder_level') or 10)
-            medicine.location_id      = request.POST.get('location') or None
+            medicine.location         = loc
             medicine.is_s2_regulated  = request.POST.get('is_s2_regulated') == '1'
             medicine.save()
             messages.success(request, f'Medicine "{medicine.medicine_name}" updated.')
@@ -618,6 +677,12 @@ def inventory_stock_adjust(request, pk):
 
             old_qty = medicine.stock_quantity
 
+            if move_type != 'out' and medicine.location and medicine.location.is_locked:
+                return JsonResponse({'error': f'Main location "{medicine.location.code}" is locked.'}, status=400)
+
+            if move_type != 'out' and medicine.location and medicine.location.is_supply_office:
+                return JsonResponse({'error': 'Main location is a Supply Office. Use Stock Management → Stock In.'}, status=400)
+
             if move_type == 'out':
                 _deduct_fefo(medicine, qty, request.user,
                              movement_type='out', notes=notes)
@@ -666,7 +731,7 @@ def medicine_search_ajax(request):
     results = []
     for m in qs:
         # Earliest non-expired active batch for display
-        fefo_batch = m.batches.filter(quantity__gt=0, do_not_release=False).order_by(
+        fefo_batch = m.batches.releasable().order_by(
             F('expiry_date').asc(nulls_last=True), 'received_at'
         ).first()
         results.append({
@@ -810,6 +875,16 @@ def stock_in_view(request):
                     return redirect('stock_management')
             eff_loc = location or medicine.location      # blank = medicine's main location
 
+
+            if eff_loc and eff_loc.is_locked:
+                messages.error(request,
+                    f'Location "{eff_loc.code}" is locked ({eff_loc.get_lock_reason_display()}). '
+                    'Unlock it or choose another location.')
+                return redirect('stock_management')
+
+            to_so = bool(eff_loc and eff_loc.is_supply_office)
+
+
             # ── Look for an existing batch: same number + same effective location ──
             batch = None
             if batch_number:
@@ -857,7 +932,7 @@ def stock_in_view(request):
             new_total = medicine.stock_quantity
             StockMovement.objects.create(
                 medicine=medicine, batch=batch,
-                movement_type='in',
+                movement_type='so_in' if to_so else 'in',
                 quantity=qty,
                 quantity_before=old_total,
                 quantity_after=new_total,
@@ -870,10 +945,16 @@ def stock_in_view(request):
                 performed_by=request.user,
             )
             loc_txt = f' → {eff_loc.code}' if eff_loc else ''
-            messages.success(request,
-                f'Stock In: +{qty} units of "{medicine.medicine_name}" '
-                f'(Batch: {batch_number or "—"}{loc_txt}). '
-                f'New total: {new_total}.')
+            if to_so:
+                messages.success(request,
+                    f'Received into Supply Office ({eff_loc.code}): +{qty} unit(s) of '
+                    f'"{medicine.medicine_name}" (Batch: {batch_number or "—"}). '
+                    f'Not counted in pharmacy stock (still {new_total}).')
+            else:
+                messages.success(request,
+                    f'Stock In: +{qty} units of "{medicine.medicine_name}" '
+                    f'(Batch: {batch_number or "—"}{loc_txt}). '
+                    f'New total: {new_total}.')
         except Exception as e:
             messages.error(request, f'Error recording Stock In: {e}')
     return redirect('stock_management')
@@ -957,14 +1038,23 @@ def stock_adjust_view(request):
 
             if batch_id:
                 batch = get_object_or_404(MedicineStock, pk=batch_id, medicine=medicine)
+                if batch.is_locked or batch.is_supply_office:
+                    messages.error(request, 'That batch is in a locked or Supply Office location and cannot be adjusted here.')
+                    return redirect('stock_management')
             else:
                 # Adjust the FEFO batch
-                batch = medicine.batches.filter(quantity__gt=0, do_not_release=False).order_by(
+                batch = medicine.batches.releasable().order_by(
                     F('expiry_date').asc(nulls_last=True), 'received_at'
                 ).first()
                 if not batch:
                     # All batches empty — create one for positive adjustments
                     if diff > 0:
+                        if medicine.location and medicine.location.is_locked:
+                            messages.error(request, f'Main location "{medicine.location.code}" is locked.')
+                            return redirect('stock_management')
+                        if medicine.location and medicine.location.is_supply_office:
+                            messages.error(request, 'Main location is a Supply Office. Use Stock In to add stock there.')
+                            return redirect('stock_management')
                         batch = MedicineStock.objects.create(
                             medicine=medicine, quantity=0, created_by=request.user
                         )
@@ -1002,7 +1092,7 @@ def stock_medicine_info(request):
         return JsonResponse({'found': False})
     try:
         m = Medicine.objects.select_related('location').prefetch_related('batches').get(pk=pk, is_active=True)
-        fefo = m.batches.filter(quantity__gt=0, do_not_release=False).order_by(
+        fefo = m.batches.releasable().order_by(
             F('expiry_date').asc(nulls_last=True), 'received_at'
         ).first()
 
@@ -1020,6 +1110,8 @@ def stock_medicine_info(request):
                 'do_not_release': b.do_not_release,
                 'location_id':    b.location_id or m.location_id or '',  # effective location
                 'location':       (b.location.code if b.location else (m.location.code if m.location else '')),
+                'locked':          bool((b.location or m.location) and (b.location or m.location).is_locked),
+                'supply_office':  bool((b.location or m.location) and (b.location or m.location).is_supply_office),
             }
             for b in m.batches.filter(quantity__gt=0).select_related('location').order_by(
                 F('expiry_date').asc(nulls_last=True), 'received_at'
@@ -1044,6 +1136,8 @@ def stock_medicine_info(request):
             'barcode':        m.barcode or '',
             'batches':        batches,
             'location_id':    m.location_id or '',
+            'supply_office_quantity': m.supply_office_quantity,
+            'locked_quantity':        m.locked_quantity,
         })
     except Medicine.DoesNotExist:
         return JsonResponse({'found': False})
@@ -2558,7 +2652,7 @@ def consumption_report(request):
             # by reversing movements that happened during or after the period.
             movements_since = StockMovement.objects.filter(
                 medicine=med, created_at__gte=period_start
-            )
+            ).exclude(movement_type='so_in')
             delta = sum(m.quantity for m in movements_since)  # signed integer
             previous_balance = max(med.stock_quantity - delta, 0)
  
@@ -2720,7 +2814,7 @@ def _pdea_register_build(med, date_from, date_to, rows_per_page, start_page):
     moves = (StockMovement.objects
              .filter(medicine=med,
                      created_at__date__gte=date_from, created_at__date__lte=date_to)
-             .exclude(movement_type='transfer')
+             .exclude(movement_type__in=('transfer', 'so_in'))
              .select_related('supplier'))
     grouped = {}
     for m in moves:
@@ -3757,6 +3851,7 @@ def category_create_ajax(request):
 # BATCH MANAGEMENT — AJAX edit + soft-delete
 # ─────────────────────────────────────────────────────────────────────────────
 
+@require('stock_management', 'edit', ajax=True)
 def batch_edit_view(request, pk):
     """
     AJAX POST — edit a MedicineStock batch's correctable fields:
@@ -3766,8 +3861,10 @@ def batch_edit_view(request, pk):
     if request.method != 'POST':
         return JsonResponse({'error': 'Invalid method.'}, status=405)
     try:
-        batch = get_object_or_404(MedicineStock, pk=pk)
-        data  = json.loads(request.body)
+        batch    = get_object_or_404(MedicineStock, pk=pk)
+        medicine = batch.medicine
+        data     = json.loads(request.body)
+        before_total = medicine.stock_quantity
 
         batch.batch_number   = data.get('batch_number', batch.batch_number)
         batch.purchase_price = data.get('purchase_price', batch.purchase_price)
@@ -3778,6 +3875,7 @@ def batch_edit_view(request, pk):
 
         # ── Location (works for held batches too; DNR status is untouched) ──
         old_loc = batch.location
+        old_eff = old_loc or medicine.location
         if 'location_id' in data:
             loc_id = _to_int(data.get('location_id'))
             if loc_id:
@@ -3788,13 +3886,26 @@ def batch_edit_view(request, pk):
                 batch.location = new_loc
             else:
                 batch.location = None
+            new_eff = batch.location or medicine.location
+            if new_eff and new_eff.is_locked and (not old_eff or old_eff.pk != new_eff.pk):
+                return JsonResponse(
+                    {'error': f'Location "{new_eff.code}" is locked. Unlock it or choose another.'},
+                    status=400)
         batch.save()
 
         if batch.location_id != (old_loc.pk if old_loc else None) and batch.quantity > 0:
-            total = batch.medicine.stock_quantity
+            after_total = medicine.stock_quantity
+            delta = after_total - before_total          # non-zero only when the move crosses a lock / Supply Office
+            if delta == 0:
+                mtype = 'transfer'
+            elif delta > 0 and old_eff and old_eff.is_supply_office:
+                mtype = 'in'                            # issued from Supply Office to pharmacy
+            else:
+                mtype = 'adjust'
             StockMovement.objects.create(
-                medicine=batch.medicine, batch=batch, movement_type='transfer',
-                quantity=0, quantity_before=total, quantity_after=total,
+                medicine=medicine, batch=batch,
+                movement_type=mtype,
+                quantity=delta, quantity_before=before_total, quantity_after=after_total,
                 batch_number=batch.batch_number, expiry_date=batch.expiry_date,
                 reference_no=f'TRF {old_loc.code if old_loc else "—"}>{batch.location.code if batch.location else "—"}',
                 notes='Batch location changed via Edit Batch',
@@ -3840,7 +3951,7 @@ def batch_delete_view(request, pk):
             medicine        = medicine,
             batch           = batch,
             movement_type   = 'adjust',
-            quantity        = -removed,
+            quantity        = new_total - old_total,
             quantity_before = old_total,
             quantity_after  = new_total,
             batch_number    = batch.batch_number,
@@ -3930,6 +4041,11 @@ def batch_dnr_view(request, pk):
             else:
                 return JsonResponse({'error': 'Invalid action.'}, status=400)
 
+
+            if action in ('hold', 'unhold'):
+                # a batch in a locked location is already outside stock_quantity, so use the real change
+                delta = medicine.stock_quantity - old_total
+
             StockMovement.objects.create(
                 medicine=medicine, batch=batch, movement_type='adjust',
                 quantity=delta, quantity_before=old_total,
@@ -4005,47 +4121,68 @@ def _to_int(value):
     except (TypeError, ValueError):
         return None
 
+def _locked_loc(loc_id):
+    """Returns the StorageLocation if loc_id is a locked location, else None."""
+    loc_id = _to_int(loc_id)
+    return StorageLocation.objects.filter(pk=loc_id, is_locked=True).first() if loc_id else None
+
+def _supply_loc(loc_id):
+    """Returns the StorageLocation if loc_id is a Supply Office location, else None."""
+    loc_id = _to_int(loc_id)
+    return StorageLocation.objects.filter(pk=loc_id, is_supply_office=True).first() if loc_id else None
 
 EXPIRY_WINDOW_DAYS = 90
 
 
 def _live_meds_qs():
-    """Active medicines with their in-stock batches preloaded (one extra query)."""
-    return Medicine.objects.filter(is_active=True).prefetch_related(
-        Prefetch('batches', queryset=MedicineStock.objects.filter(quantity__gt=0),
-                 to_attr='live_batches')
-    )
+    """Active medicines with their in-stock batches preloaded."""
+    return (Medicine.objects.filter(is_active=True).select_related('location')
+            .prefetch_related(
+                Prefetch('batches',
+                         queryset=MedicineStock.objects.filter(quantity__gt=0).select_related('location'),
+                         to_attr='live_batches')))
+
+
+def _batch_locked(b, m):
+    """True when the batch is outside pharmacy stock (locked location or Supply Office)."""
+    loc = b.location if b.location_id else m.location      # no batch location = main location
+    return bool(loc and (loc.is_locked or loc.is_supply_office))
 
 
 def _med_split(m):
-    """{location_id: {'qty': n, 'expiry': earliest_date|None}} for one medicine.
+    """{location_id: {'qty': all units, 'rel': units not on DNR, 'expiry': earliest}} for one medicine.
     A batch with no location counts as the medicine's main location."""
     split = {}
     if m.location_id:
-        split[m.location_id] = {'qty': 0, 'expiry': None}
+        split[m.location_id] = {'qty': 0, 'rel': 0, 'expiry': None}
     for b in m.live_batches:
         lid = b.location_id or m.location_id
         if not lid:
             continue
-        e = split.setdefault(lid, {'qty': 0, 'expiry': None})
+        e = split.setdefault(lid, {'qty': 0, 'rel': 0, 'expiry': None})
         e['qty'] += b.quantity
+        if not b.do_not_release:
+            e['rel'] += b.quantity
         if b.expiry_date and (e['expiry'] is None or b.expiry_date < e['expiry']):
             e['expiry'] = b.expiry_date
     return split
 
 
 def _placements():
-    """{location_id: {medicine_id: {'med', 'qty', 'expiry'}}}"""
+    """{location_id: {medicine_id: {'med', 'qty', 'rel', 'expiry'}}}
+    med.total_qty = AVAILABLE stock (excludes Do-Not-Release and locked locations)."""
     out = {}
     for m in _live_meds_qs():
-        m.total_qty = sum(b.quantity for b in m.live_batches)
+        m.total_qty = sum(b.quantity for b in m.live_batches
+                          if not b.do_not_release and not _batch_locked(b, m))
         for lid, e in _med_split(m).items():
-            out.setdefault(lid, {})[m.pk] = {'med': m, 'qty': e['qty'], 'expiry': e['expiry']}
+            out.setdefault(lid, {})[m.pk] = {
+                'med': m, 'qty': e['qty'], 'rel': e['rel'], 'expiry': e['expiry']}
     return out
 
 
 def _stock_state(m):
-    """Status is based on the medicine's TOTAL stock across all locations."""
+    """Status is based on the medicine's AVAILABLE stock across all unlocked locations."""
     qty = m.total_qty or 0
     if qty == 0:
         return 'out'
@@ -4066,27 +4203,38 @@ def storage_locations(request):
     placements = _placements()
     areas = list(
         StorageArea.objects.prefetch_related(
-            Prefetch('locations', queryset=StorageLocation.objects.order_by('code'))
+            Prefetch('locations',
+                     queryset=StorageLocation.objects.select_related('locked_by').order_by('code'))
         )
     )
 
     plan = []
-    shelves = used = total_meds = 0
+    shelves = used = total_meds = locked_n = 0
     for a in areas:
         locs = []
         for l in a.locations.all():
             pl       = placements.get(l.pk, {}) if l.kind == 'shelf' else {}
-            alerts   = sum(1 for e in pl.values() if _stock_state(e['med']) != 'ok')
+            alerts   = 0 if (l.is_locked or l.is_supply_office) else sum(1 for e in pl.values() if _stock_state(e['med']) != 'ok')
             expiring = sum(1 for e in pl.values() if e['expiry'] and e['expiry'] <= soon)
             if l.kind == 'shelf':
                 shelves += 1
                 total_meds += len(pl)
                 if pl:
                     used += 1
+                if l.is_locked:
+                    locked_n += 1
+            by = l.locked_by
             locs.append({
                 'id': l.pk, 'code': l.code, 'name': l.name, 'kind': l.kind,
                 'x': l.x, 'y': l.y, 'w': l.w, 'h': l.h,
                 'notes': l.notes, 'count': len(pl), 'alert': alerts, 'expiring': expiring,
+                'locked': l.is_locked,
+                'supply_office': l.is_supply_office,
+                'lock_reason': l.get_lock_reason_display() if l.is_locked else '',
+                'lock_notes': l.lock_notes if l.is_locked else '',
+                'locked_by': ((by.get_full_name() or by.username) if by else '') if l.is_locked else '',
+                'locked_at': (timezone.localtime(l.locked_at).strftime('%b %d, %Y %I:%M %p')
+                              if l.is_locked and l.locked_at else ''),
             })
         plan.append({
             'id': a.pk, 'name': a.name, 'description': a.description,
@@ -4104,17 +4252,21 @@ def storage_locations(request):
             'open':  _to_int(request.GET.get('open')),
             'edit':  bool(can_edit and request.GET.get('edit')),
         },
-        'area_count':  len(areas),
-        'shelf_count': shelves,
-        'used_count':  used,
-        'med_count':   total_meds,
+        'area_count':   len(areas),
+        'shelf_count':  shelves,
+        'used_count':   used,
+        'med_count':    total_meds,
+        'locked_count': locked_n,
         'kind_choices': StorageLocation.KIND_CHOICES,
+        'lock_reasons': StorageLocation.LOCK_REASON_CHOICES,
         'can_manage': can_edit,
+        'can_stock_in': can(request.user, 'stock_management', 'edit'),
+        'suppliers':    Supplier.objects.filter(is_active=True),
         'can_admin':  can_admin,
     })
 
 
-# ── JSON: medicines inside one shelf (quantity = amount stored HERE) ─────────
+# ── JSON: medicines inside one shelf (qty = amount stored HERE) ──────────────
 @require(('storage_locations', 'inventory'), ajax=True)
 def storage_location_medicines(request, pk):
     loc   = get_object_or_404(StorageLocation.objects.select_related('area'), pk=pk)
@@ -4137,13 +4289,17 @@ def storage_location_medicines(request, pk):
             'id': m.pk, 'name': m.medicine_name, 'generic': m.generic_name,
             'brand': m.brand_name, 'strength': m.strength,
             'form': m.get_dosage_form_display(),
-            'qty': e['qty'], 'total': m.total_qty, 'status': _stock_state(m),
+            'qty': e['qty'],            # all units stored here
+            'rel': e['rel'],            # units here that are not on Do-Not-Release
+            'total': m.total_qty,       # AVAILABLE stock (excludes locked + DNR)
+            'status': 'supply' if loc.is_supply_office else ('locked' if loc.is_locked else _stock_state(m)),
             'expiry': exp.strftime('%b %d, %Y') if exp else '', 'expiry_state': exp_state,
             's2': m.is_s2_regulated,
         })
     return JsonResponse({
         'id': loc.pk, 'code': loc.code, 'name': loc.name, 'area': loc.area.name,
-        'kind': loc.kind, 'notes': loc.notes, 'medicines': rows,
+        'kind': loc.kind, 'notes': loc.notes, 'locked': loc.is_locked, 'medicines': rows,
+        'supply_office': loc.is_supply_office,
     })
 
 
@@ -4170,13 +4326,16 @@ def storage_find_medicine(request):
                 continue
             results.append({
                 'name': m.medicine_name, 'strength': m.strength, 'qty': e['qty'],
-                'loc_id': loc.pk, 'code': loc.code,
-                'area_id': loc.area_id, 'area': loc.area.name,
+                'loc_id': loc.pk, 'code': loc.code, 'locked': loc.is_locked,
+                'area_id': loc.area_id, 'area': loc.area.name, 'supply_office': loc.is_supply_office,
             })
     return JsonResponse({'results': results})
 
 
-# ── Transfer stock between locations (total never changes) ───────────────────
+# ── Transfer stock between locations ─────────────────────────────────────────
+# Total available stock is unchanged for ordinary moves. Moving OUT of a locked
+# location into an unlocked one releases the units (available total goes up).
+# Moving INTO a locked location is refused.
 @require('storage_locations', 'edit', ajax=True)
 @require_POST
 def storage_location_transfer(request):
@@ -4201,11 +4360,15 @@ def storage_location_transfer(request):
         dst = get_object_or_404(StorageLocation, pk=dst_id)
         if src.kind != StorageLocation.KIND_SHELF or dst.kind != StorageLocation.KIND_SHELF:
             return JsonResponse({'ok': False, 'error': 'Both locations must be storage locations.'}, status=400)
+        if dst.is_locked:
+            return JsonResponse({'ok': False,
+                'error': f'"{dst.code}" is locked ({dst.get_lock_reason_display()}). '
+                         'Unlock it first or choose another destination.'}, status=400)
 
         def at(loc):   # batches whose effective location is `loc`
             return Q(location=loc) | Q(location__isnull=True, medicine__location=loc)
 
-                # Held (Do Not Release) batches can't be transferred by quantity
+        # Held (Do Not Release) batches can't be transferred by quantity
         src_batches = list(
             med.batches.select_for_update()
             .filter(quantity__gt=0, do_not_release=False).filter(at(src))
@@ -4221,12 +4384,13 @@ def storage_location_transfer(request):
                 'error': f'Only {available} available unit(s) of "{med.medicine_name}" are stored in {src.code}.{extra}'},
                 status=400)
 
-        total = med.stock_quantity          # unchanged by a transfer
+        total_before = med.stock_quantity
         remaining = qty
         for b in src_batches:               # FEFO: earliest expiry moves first
             if remaining <= 0:
                 break
-            take = min(b.quantity, remaining)
+            take   = min(b.quantity, remaining)
+            before = med.stock_quantity
             dest = (med.batches.filter(batch_number=b.batch_number, expiry_date=b.expiry_date,
                                        do_not_release=False)
                     .filter(at(dst)).exclude(pk=b.pk).first())
@@ -4249,29 +4413,234 @@ def storage_location_transfer(request):
                 b.quantity -= take
                 b.save()
             remaining -= take
+            after = med.stock_quantity
+            delta = after - before
+            if delta == 0:
+                mtype = 'transfer'
+            elif delta > 0 and src.is_supply_office:
+                mtype = 'in'                     # Supply Office issued to pharmacy = pharmacy receipt
+            else:
+                mtype = 'adjust'
+
+            note = f'Transferred {take} unit(s) from {src.code} to {dst.code}'
+            if mtype == 'in':
+                note += ' (issued from Supply Office)'
+            elif delta > 0:
+                note += ' (released from locked location)'
+            elif delta < 0:
+                note += ' (moved out of pharmacy stock)'
+            if notes:
+                note += f' — {notes}'
 
             StockMovement.objects.create(
-                medicine=med, batch=dest, movement_type='transfer',
-                quantity=0, quantity_before=total, quantity_after=total,
+                medicine=med, batch=dest, movement_type=mtype,
+                quantity=delta, quantity_before=before, quantity_after=after,
+                supplier=b.supplier if mtype == 'in' else None,
                 batch_number=b.batch_number, expiry_date=b.expiry_date,
+                purchase_price=b.purchase_price if mtype == 'in' else None,
                 reference_no=f'TRF {src.code}>{dst.code}',
-                notes=f'Transferred {take} unit(s) from {src.code} to {dst.code}' + (f' — {notes}' if notes else ''),
-                performed_by=request.user,
+                notes=note, performed_by=request.user,
             )
 
         # If nothing is left in the old main location, the main location follows the stock
         left_at_src = available - qty + held_here
         moved_primary = False
-        if med.location_id == src.pk and left_at_src == 0:
+        if med.location_id == src.pk and left_at_src == 0 and not dst.is_supply_office:
             med.location = dst
             med.save(update_fields=['location', 'updated_at'])
             moved_primary = True
+        total_after = med.stock_quantity
 
-    msg = f'Transferred {qty} unit(s) of "{med.medicine_name}" from {src.code} to {dst.code}. Total stock unchanged ({total}).'
+    if total_after == total_before:
+        msg = (f'Transferred {qty} unit(s) of "{med.medicine_name}" from {src.code} to {dst.code}. '
+               f'Total stock unchanged ({total_after}).')
+    else:
+        msg = (f'Transferred {qty} unit(s) of "{med.medicine_name}" from {src.code} to {dst.code}. '
+               f'Pharmacy stock {total_before} → {total_after}.')
     if moved_primary:
         msg += f' Main location is now {dst.code}.'
     messages.success(request, msg)
-    return JsonResponse({'ok': True, 'moved': qty, 'total': total})
+    return JsonResponse({'ok': True, 'moved': qty, 'total': total_after,
+                         'released': total_after - total_before})
+
+
+# ── Lock / unlock a location ─────────────────────────────────────────────────
+@require('storage_locations', 'edit', ajax=True)
+@require_POST
+def storage_location_lock(request, pk):
+    """
+    JSON {action: 'lock'|'unlock', reason, notes}.
+    Locking pulls every available batch in the location out of the available total
+    (logged as 'adjust' / ref LOCK). Unlocking puts them back (ref UNLOCK).
+    """
+    try:
+        data = json.loads(request.body or b'{}')
+    except (ValueError, TypeError):
+        return JsonResponse({'ok': False, 'error': 'Invalid data.'}, status=400)
+    action = data.get('action', 'lock')
+    reason = str(data.get('reason', '') or '')
+    notes  = str(data.get('notes', '') or '').strip()[:500]
+
+    with transaction.atomic():
+        loc = get_object_or_404(StorageLocation.objects.select_for_update(), pk=pk)
+        if loc.kind != StorageLocation.KIND_SHELF:
+            return JsonResponse({'ok': False, 'error': 'Only storage locations can be locked.'}, status=400)
+
+        if action == 'lock':
+            if loc.is_locked:
+                return JsonResponse({'ok': False, 'error': f'"{loc.code}" is already locked.'}, status=400)
+            if reason not in dict(StorageLocation.LOCK_REASON_CHOICES):
+                return JsonResponse({'ok': False, 'error': 'Please select a reason for locking.'}, status=400)
+            if reason == 'other' and not notes:
+                return JsonResponse({'ok': False, 'error': 'Please describe the reason in the notes.'}, status=400)
+            sign, ref = -1, 'LOCK'
+        elif action == 'unlock':
+            if not loc.is_locked:
+                return JsonResponse({'ok': False, 'error': f'"{loc.code}" is not locked.'}, status=400)
+            sign, ref = 1, 'UNLOCK'
+        else:
+            return JsonResponse({'ok': False, 'error': 'Invalid action.'}, status=400)
+
+        at = Q(location=loc) | Q(location__isnull=True, medicine__location=loc)
+        batches = list(MedicineStock.objects.select_for_update()
+                       .filter(quantity__gt=0, do_not_release=False).filter(at)
+                       .order_by('medicine_id', 'id'))
+        if loc.is_supply_office:
+            batches = []
+        meds    = Medicine.objects.in_bulk({b.medicine_id for b in batches})
+        running = {mid: m.stock_quantity for mid, m in meds.items()}     # BEFORE the flag changes
+
+        prev_label = loc.get_lock_reason_display()
+        if action == 'lock':
+            loc.is_locked, loc.lock_reason, loc.lock_notes = True, reason, notes
+            loc.locked_at, loc.locked_by = timezone.now(), request.user
+            label = loc.get_lock_reason_display()
+            log = f'Location {loc.code} locked — {label}' + (f' — {notes}' if notes else '')
+        else:
+            loc.is_locked, loc.lock_reason, loc.lock_notes = False, '', ''
+            loc.locked_at, loc.locked_by = None, None
+            log = f'Location {loc.code} unlocked (was: {prev_label})' + (f' — {notes}' if notes else '')
+        loc.save()
+
+        units = 0
+        for b in batches:
+            before = running[b.medicine_id]
+            delta  = sign * b.quantity
+            after  = before + delta
+            running[b.medicine_id] = after
+            units += b.quantity
+            StockMovement.objects.create(
+                medicine=meds[b.medicine_id], batch=b, movement_type='adjust',
+                quantity=delta, quantity_before=before, quantity_after=after,
+                batch_number=b.batch_number, expiry_date=b.expiry_date,
+                purchase_price=b.purchase_price, supplier_id=b.supplier_id,
+                reference_no=ref, notes=log, performed_by=request.user,
+            )
+
+    if action == 'lock':
+        msg = (f'Location "{loc.code}" locked. {units} unit(s) of {len(meds)} medicine(s) '
+               'are now held and excluded from available stock.')
+    else:
+        msg = (f'Location "{loc.code}" unlocked. {units} unit(s) of {len(meds)} medicine(s) '
+               'are available again.')
+    messages.success(request, msg)
+    return JsonResponse({'ok': True, 'units': units, 'medicines': len(meds), 'locked': loc.is_locked})
+
+
+
+# ── Stock In directly into one location (from the floor plan) ────────────────
+@require('stock_management', 'edit', ajax=True)
+@require_POST
+def storage_location_stock_in(request, pk):
+    """
+    JSON {medicine_id, quantity, batch_number, expiry_date, purchase_price,
+          supplier_id, reference_no, notes}.
+    Same rules as stock_in_view, but the location is fixed to <pk>.
+    """
+    try:
+        data   = json.loads(request.body or b'{}')
+        med_id = int(data['medicine_id'])
+        qty    = int(data['quantity'])
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return JsonResponse({'ok': False, 'error': 'Invalid data.'}, status=400)
+
+    batch_number = str(data.get('batch_number', '') or '').strip()
+    expiry_date  = str(data.get('expiry_date', '') or '').strip() or None
+    supplier_id  = _to_int(data.get('supplier_id'))
+    reference_no = str(data.get('reference_no', '') or '').strip()[:100]
+    notes        = str(data.get('notes', '') or '').strip()[:500]
+    try:
+        purchase_price = float(data.get('purchase_price') or 0)
+        if purchase_price < 0:
+            raise ValueError
+    except (ValueError, TypeError):
+        return JsonResponse({'ok': False, 'error': 'Invalid purchase price.'}, status=400)
+
+    if qty <= 0:
+        return JsonResponse({'ok': False, 'error': 'Quantity must be greater than zero.'}, status=400)
+    if not batch_number:
+        return JsonResponse({'ok': False, 'error': 'Batch number is required.'}, status=400)
+    if not expiry_date:
+        return JsonResponse({'ok': False, 'error': 'Expiry date is required.'}, status=400)
+
+    with transaction.atomic():
+        loc = get_object_or_404(StorageLocation, pk=pk)
+        if loc.kind != StorageLocation.KIND_SHELF:
+            return JsonResponse({'ok': False, 'error': 'Only storage locations can receive stock.'}, status=400)
+        if loc.is_locked:
+            return JsonResponse({'ok': False,
+                'error': f'"{loc.code}" is locked ({loc.get_lock_reason_display()}). Unlock it first.'}, status=400)
+
+        medicine  = get_object_or_404(Medicine.objects.select_for_update(), pk=med_id, is_active=True)
+        old_total = medicine.stock_quantity
+        to_so     = loc.is_supply_office
+
+        # existing batch = same number at the same effective location
+        batch = (medicine.batches
+                 .filter(batch_number=batch_number)
+                 .filter(Q(location=loc) | Q(location__isnull=True, medicine__location=loc))
+                 .first())
+
+        if batch:
+            if batch.do_not_release:
+                return JsonResponse({'ok': False,
+                    'error': f'Batch "{batch.batch_number}" is on Do Not Release. Lift the hold first.'}, status=400)
+            if batch.expiry_date and str(batch.expiry_date) != expiry_date:
+                return JsonResponse({'ok': False,
+                    'error': f'Batch "{batch.batch_number}" already has expiry {batch.expiry_date}. '
+                             'Use a different batch number for a different expiry.'}, status=400)
+            batch.quantity += qty
+            if purchase_price > 0:
+                batch.purchase_price = purchase_price
+            if supplier_id:
+                batch.supplier_id = supplier_id
+            batch.save()
+        else:
+            batch = MedicineStock.objects.create(
+                medicine=medicine, batch_number=batch_number, expiry_date=expiry_date,
+                quantity=qty, purchase_price=purchase_price, supplier_id=supplier_id,
+                location=loc, created_by=request.user,
+            )
+
+        new_total = medicine.stock_quantity
+        StockMovement.objects.create(
+            medicine=medicine, batch=batch,
+            movement_type='so_in' if to_so else 'in',
+            quantity=qty, quantity_before=old_total, quantity_after=new_total,
+            supplier_id=supplier_id, batch_number=batch.batch_number,
+            expiry_date=batch.expiry_date, purchase_price=batch.purchase_price,
+            reference_no=reference_no, notes=notes, performed_by=request.user,
+        )
+
+    if to_so:
+        msg = (f'Received into Supply Office ({loc.code}): +{qty} unit(s) of "{medicine.medicine_name}" '
+               f'(Batch: {batch_number}). Not counted in pharmacy stock (still {new_total}).')
+    else:
+        msg = (f'Stock In: +{qty} unit(s) of "{medicine.medicine_name}" '
+               f'(Batch: {batch_number} → {loc.code}). New total: {new_total}.')
+    messages.success(request, msg)
+    return JsonResponse({'ok': True, 'total': new_total})
+
 
 
 # ── Areas ────────────────────────────────────────────────────────────────────
@@ -4350,6 +4719,7 @@ def storage_location_create(request):
     if kind not in dict(StorageLocation.KIND_CHOICES):
         kind = StorageLocation.KIND_SHELF
     loc = StorageLocation.objects.create(
+            is_supply_office=(kind == StorageLocation.KIND_SHELF and request.POST.get('is_supply_office') == '1'),
         area=area, code=code, name=request.POST.get('name', '').strip()[:80],
         kind=kind, notes=request.POST.get('notes', '').strip(), **_default_slot(area),
     )
@@ -4376,6 +4746,15 @@ def storage_location_update(request, pk):
         messages.error(request, f'"{loc.code}" still holds medicines — reassign them before making it a landmark.')
         return redirect(_storage_url(loc.area_id))
 
+    if kind == StorageLocation.KIND_LANDMARK and loc.is_locked:
+        messages.error(request, f'"{loc.code}" is locked — unlock it before making it a landmark.')
+        return redirect(_storage_url(loc.area_id))
+
+    want_so = kind == StorageLocation.KIND_SHELF and request.POST.get('is_supply_office') == '1'
+    if want_so != loc.is_supply_office and _loc_has_stock(loc):
+        messages.error(request, f'"{loc.code}" still holds stock — empty it before changing its type.')
+        return redirect(_storage_url(loc.area_id))
+
     new_area = StorageArea.objects.filter(pk=_to_int(request.POST.get('area')) or 0).first() or loc.area
     if new_area.pk != loc.area_id:
         loc.area = new_area
@@ -4386,6 +4765,7 @@ def storage_location_update(request, pk):
     loc.name  = request.POST.get('name', '').strip()[:80]
     loc.kind  = kind
     loc.notes = request.POST.get('notes', '').strip()
+    loc.is_supply_office = want_so
     loc.save()
     messages.success(request, f'Location "{loc.code}" updated.')
     return redirect(_storage_url(loc.area_id, focus=loc.pk))
@@ -4395,6 +4775,9 @@ def storage_location_update(request, pk):
 @require_POST
 def storage_location_delete(request, pk):
     loc = get_object_or_404(StorageLocation, pk=pk)
+    if loc.is_locked:
+        messages.error(request, f'"{loc.code}" is locked. Unlock it (or transfer its medicines out) before removing it.')
+        return redirect(_storage_url(loc.area_id))
     area_id, code = loc.area_id, loc.code
     n = len(_placements().get(loc.pk, {}))
     loc.delete()                       # Medicine.location is SET_NULL
@@ -4950,7 +5333,7 @@ def _stock_card_build(med, date_from, date_to, rows_per_page):
 
     moves = list(StockMovement.objects
                  .filter(medicine=med, created_at__gte=start_dt, created_at__lt=end_dt)
-                 .exclude(movement_type='transfer')
+                 .exclude(movement_type__in=('transfer', 'so_in'))
                  .select_related('supplier')
                  .order_by('created_at', 'id'))
 
@@ -5177,7 +5560,7 @@ def stock_card_export_pdf(request):
             data = [
                 [P('Date', head), P('Reference', head), P('Receipt', head), '',
                  P('Issuance', head), P('Balance', head)],
-                ['', '', P('Qty', head), P('Expiration<br/>Date', head), P('Qty', head), ''],
+                ['', '', P('Qty', head), P('Expiration Date', head), P('Qty', head), ''],
             ]
             # Price / balance-forwarded row
             data.append(['', P(f'Price: {card["price"]}', price_st), '', '', '',
@@ -5351,6 +5734,7 @@ def _supplies_ledger_build(med, date_from, date_to, rows_per_page, group):
     opening_qty  = prev.quantity_after if prev else 0
     opening_cost = zero
     for q, p in (StockMovement.objects.filter(medicine=med, created_at__lt=start_dt)
+                 .exclude(movement_type='so_in')
                  .values_list('quantity', 'purchase_price')):
         opening_cost += q * price_of(p)
     if opening_qty <= 0 or opening_cost < 0:
@@ -5358,7 +5742,7 @@ def _supplies_ledger_build(med, date_from, date_to, rows_per_page, group):
 
     moves = list(StockMovement.objects
                  .filter(medicine=med, created_at__gte=start_dt, created_at__lt=end_dt)
-                 .exclude(movement_type='transfer')
+                 .exclude(movement_type__in=('transfer', 'so_in'))
                  .select_related('supplier')
                  .order_by('created_at', 'id'))
 

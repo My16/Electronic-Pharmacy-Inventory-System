@@ -214,6 +214,97 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
 .xfer-total{text-align:center;font-size:11.5px;color:#78909c;margin-top:8px}
 
 
+/* ── Locked locations ── */
+.shelf.locked{background:repeating-linear-gradient(45deg,#eef2f7,#eef2f7 8px,#e2e8f0 8px,#e2e8f0 16px);border-color:#64748b}
+.shelf.locked .shelf-code{color:#334155}
+.shelf-lock{position:absolute;top:0;left:0;display:inline-flex;align-items:center;background:#475569;color:#fff;font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:7px 0 7px 0}
+.shelf-count.locked{background:#475569}
+.legend i.lock{background:repeating-linear-gradient(45deg,#eef2f7,#eef2f7 3px,#cbd5e1 3px,#cbd5e1 6px);border-color:#64748b}
+.loc-pill.lock{background:#e2e8f0;color:#475569}
+.count-badge.lock-badge{background:#e2e8f0;color:#475569}
+.area-tab .tab-lock{font-size:10px;opacity:.75}
+.btn-icon.lock{background:#eef2f7;color:#475569}.btn-icon.lock:hover{background:#e2e8f0}
+.btn-icon.unlock{background:rgba(245,158,11,.12);color:#d97706}.btn-icon.unlock:hover{background:rgba(245,158,11,.22)}
+.stock-badge.lock-badge2{background:#e2e8f0;color:#475569}
+.btn-submit:disabled,.btn-danger:disabled{opacity:.45;cursor:not-allowed}
+.lock-banner{display:flex;align-items:flex-start;gap:10px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:10px;padding:11px 14px;margin-bottom:14px;font-size:12px;color:#334155;line-height:1.5}
+.lock-banner>i{color:#475569;margin-top:2px}
+.lock-meta{font-size:11px;color:#64748b;margin-top:3px}
+
+/* ── Supply Office ── */
+.shelf.supply{background:rgba(59,91,219,.08);border-color:#3b5bdb}
+.shelf.supply .shelf-code{color:#2b3f9e}
+.shelf-so{position:absolute;bottom:0;left:0;display:inline-flex;align-items:center;background:#3b5bdb;color:#fff;font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:0 7px 0 7px}
+.shelf-count.supply{background:#3b5bdb}
+.legend i.so{background:rgba(59,91,219,.1);border-color:#3b5bdb}
+.loc-pill.so{background:rgba(59,91,219,.12);color:#3b5bdb}
+.stock-badge.so-badge{background:rgba(59,91,219,.12);color:#3b5bdb}
+.so-check{display:flex;align-items:flex-start;gap:10px;background:rgba(59,91,219,.06);border:1px solid rgba(59,91,219,.22);border-radius:9px;padding:10px 14px;cursor:pointer}
+.so-check input{width:16px;height:16px;accent-color:#3b5bdb;margin-top:2px;flex-shrink:0}
+.so-check strong{display:block;font-size:12.5px;color:#1a2433}
+.so-check small{font-size:11px;color:#78909c}
+
+/* ── Lock modal ── */
+.lk-list{max-height:230px;overflow-y:auto;border:1px solid #eef2f7;border-radius:10px;margin-bottom:14px}
+.lk-row{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid #f4f7fb;font-size:12.5px}
+.lk-row:last-child{border-bottom:none}
+.lk-main{flex:1;min-width:0}
+.lk-delta{font-size:11.5px;color:#64748b;white-space:nowrap;text-align:right}
+.lk-delta.bad{color:#dc2626;font-weight:700}
+.lk-delta.good{color:#16a34a;font-weight:700}
+.lk-confirm{display:flex;gap:9px;align-items:flex-start;font-size:12px;color:#475569;margin-top:14px;cursor:pointer;line-height:1.45}
+.lk-confirm input{margin-top:3px}
+
+
+/* ── Stock In modal ── */
+.si-pick{position:relative}
+.si-results{display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e0e6ed;border-top:none;border-radius:0 0 10px 10px;box-shadow:0 8px 24px rgba(0,0,0,.1);max-height:220px;overflow-y:auto;z-index:50}
+.si-results.open{display:block}
+.si-item{padding:9px 13px;cursor:pointer;border-bottom:1px solid #f4f7fb;font-size:12.5px;color:#1a2433}
+.si-item:last-child{border-bottom:none}.si-item:hover{background:#f0f4f8}
+.si-item small{display:block;font-size:11px;color:#94a3b8;margin-top:1px}
+.si-chosen{display:none;align-items:center;justify-content:space-between;gap:10px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.25);border-radius:9px;padding:9px 12px;margin-top:8px;font-size:12.5px;color:#15803d}
+.si-chosen.show{display:flex}
+.btn-stockin{background:#16a34a;color:#fff;border:none;border-radius:8px;padding:8px 22px;font-size:12.5px;font-weight:600;font-family:'Poppins',sans-serif;cursor:pointer;box-shadow:0 2px 8px rgba(22,163,74,.25)}
+.btn-stockin:hover{background:#15803d}.btn-stockin:disabled{opacity:.5;cursor:not-allowed}
+
+
+/* ── Compare modal ── */
+.cmp-toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.cmp-check{font-size:12px;color:#64748b;display:flex;align-items:center;gap:6px;cursor:pointer}
+.cmp-grid{display:grid;gap:14px;grid-template-columns:repeat(var(--n,2),minmax(0,1fr))}
+.cmp-pane{border:1px solid #eef2f7;border-radius:12px;overflow:hidden;background:#fff;min-width:0}
+.cmp-pane-head{display:flex;gap:6px;padding:10px;background:#fafbfc;border-bottom:1px solid #f0f4f8;align-items:center}
+.cmp-pane-head select{min-width:0;flex:1}
+.cmp-pane-body{padding:12px}
+.cmp-pane .data-table thead th{padding:8px 10px}
+.cmp-pane .data-table td{padding:8px 10px}
+.cmp-row-common td:first-child{box-shadow:inset 3px 0 0 #00ADB5}
+.cmp-also{display:inline-flex;gap:4px;align-items:center;background:rgba(0,173,181,.1);color:#00ADB5;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;margin:3px 4px 0 0}
+.cmp-empty{text-align:center;padding:36px 14px;color:#90a4ae;font-size:12.5px}
+
+
+.si-batches{margin-top:14px;border:1px solid #bae6fd;background:#f0f9ff;border-radius:10px;padding:10px 12px;display:none}
+.si-batches.show{display:block}
+.si-batches-title{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#0369a1;margin-bottom:7px}
+.si-batch{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 10px;margin-bottom:5px;border:1px solid #e0f2fe;background:#fff;border-radius:7px;font-size:12px;cursor:pointer;transition:background .15s}
+.si-batch:hover{background:#f0f9ff}
+.si-batch.selected{background:#0284c7;border-color:#0284c7;color:#fff}
+.si-batch.selected .si-b-sub,.si-batch.selected .si-b-qty{color:#fff}
+.si-batch.disabled{opacity:.5;cursor:not-allowed}
+.si-b-no{font-weight:600;font-family:monospace;font-size:12px}
+.si-b-sub{font-size:11px;color:#64748b}
+.si-b-qty{font-weight:700;color:#0284c7;white-space:nowrap}
+.si-hint{display:none;font-size:11.5px;font-weight:600;padding:7px 10px;border-radius:7px}
+.si-hint.add{display:block;background:#e0f2fe;color:#0369a1}
+.si-hint.new{display:block;background:rgba(34,197,94,.1);color:#16a34a}
+.si-hint.warn{display:block;background:rgba(239,68,68,.1);color:#dc2626}
+#siExpiry[readonly]{background:#eef2f7;color:#64748b;cursor:not-allowed}
+
+
+
+@media (max-width:900px){.cmp-grid{grid-template-columns:1fr}}
+
 @media (max-width:1100px){
     .plan-layout{grid-template-columns:1fr}
     .stats-row{grid-template-columns:repeat(2,1fr)}
@@ -249,6 +340,7 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
         <div class="toolbar-left">
             <span class="table-title">Floor Plan</span>
             <span class="count-badge" id="areaBadge">—</span>
+            <span class="count-badge lock-badge" id="lockBadge" style="display:none"></span>
         </div>
         <div class="toolbar-right">
             <div class="find-wrap">
@@ -258,6 +350,7 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
                 </div>
                 <div class="find-results" id="findResults"></div>
             </div>
+            <button class="btn-scan" id="btnCompare" onclick="openCompare()"><i class="fas fa-table-columns"></i> Compare</button>
             {% if can_manage %}
             <button class="btn-scan" id="btnEdit" onclick="toggleEdit(true)"><i class="fas fa-up-down-left-right"></i> Edit Layout</button>
             <button class="btn-scan active" id="btnCancel" style="display:none" onclick="cancelEdit()"><i class="fas fa-xmark"></i> Cancel</button>
@@ -294,6 +387,8 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
         <span><i class="warn"></i> Has low / out-of-stock medicines</span>
         <span><i class="exp"></i> Has medicines expiring soon / expired (≤ 90 days)</span>
         <span><i class="dark"></i> Landmark (not storage)</span>
+        <span><i class="lock"></i> Locked (held out of available stock)</span>
+        <span><i class="so"></i> Supply Office (not counted in pharmacy stock)</span>
     </div>
 </div>
 
@@ -310,6 +405,7 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
         </div>
         <div class="modal-body">
             <div class="meds-summary" id="medsSummary"></div>
+            <div id="medsLock"></div>
             <div id="medsNotes"></div>
             <div class="search-box" style="margin-bottom:12px;width:100%">
                 <i class="fas fa-search"></i>
@@ -319,8 +415,36 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
         </div>
         <div class="modal-footer">
             {% if can_admin %}<button type="button" class="btn-soft red" id="medsDelete" style="margin-right:auto"><i class="fas fa-trash-can"></i> Remove</button>{% endif %}
+            {% if can_manage %}<button type="button" class="btn-soft" id="medsLockBtn"></button>{% endif %}
+            {% if can_stock_in %}<button type="button" class="btn-soft" id="medsStockIn" style="background:rgba(22,163,74,.1);border-color:rgba(22,163,74,.3);color:#16a34a"><i class="fas fa-plus-circle"></i> Stock In</button>{% endif %}
+            <button type="button" class="btn-soft" id="medsCompare"><i class="fas fa-table-columns"></i> Compare</button>
             {% if can_manage %}<button type="button" class="btn-soft" id="medsEdit"><i class="fas fa-pen-to-square"></i> Edit Location</button>{% endif %}
             <button type="button" class="btn-cancel" onclick="closeModal('medsModal')">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── COMPARE LOCATIONS (side by side) ─────────────────── -->
+<div class="modal-overlay" id="cmpModal">
+    <div class="modal" style="max-width:1320px">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title"><i class="fas fa-table-columns"></i>Compare Locations</div>
+                <div class="modal-sub">Review the medicines of locations from any area, side by side</div>
+            </div>
+            <button class="modal-close" onclick="closeModal('cmpModal')"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <div class="cmp-toolbar">
+                <div class="search-box" style="flex:1;min-width:220px"><i class="fas fa-search"></i>
+                    <input type="text" id="cmpFilter" placeholder="Filter medicines in all panes…" autocomplete="off" oninput="renderCompare()" style="width:100%"></div>
+                <label class="cmp-check"><input type="checkbox" id="cmpCommon" onchange="renderCompare()"> Only medicines found in 2+ panes</label>
+                <button type="button" class="btn-soft sm" id="cmpAdd" onclick="cmpAddPane()"><i class="fas fa-plus"></i> Add pane</button>
+            </div>
+            <div class="cmp-grid" id="cmpGrid"></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="closeModal('cmpModal')">Close</button>
         </div>
     </div>
 </div>
@@ -340,7 +464,11 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
                     <div class="form-group"><label class="form-label">Code *</label><input type="text" name="code" id="l_code" class="form-control" maxlength="30" required placeholder="e.g. SR1-G5"></div>
                     <div class="form-group"><label class="form-label">Display Name</label><input type="text" name="name" id="l_name" class="form-control" maxlength="80" placeholder="Optional, e.g. Antibiotics"></div>
                     <div class="form-group"><label class="form-label">Type</label>
-                        <select name="kind" id="l_kind" class="form-control">{% for val,label in kind_choices %}<option value="{{ val }}">{{ label }}</option>{% endfor %}</select>
+                        <select name="kind" id="l_kind" class="form-control" onchange="syncSo()">{% for val,label in kind_choices %}<option value="{{ val }}">{{ label }}</option>{% endfor %}</select>
+                    </div>
+                    <div class="form-group" id="l_so_wrap" style="grid-column:span 2;">
+                        <label class="so-check"><input type="checkbox" name="is_supply_office" value="1" id="l_so">
+                            <span><strong>Supply Office storage</strong><small>Receives deliveries but is never counted in pharmacy stock. Stock reaches the pharmacy only by Transfer.</small></span></label>
                     </div>
                     <div class="form-group" style="grid-column:span 2;"><label class="form-label">Notes</label><textarea name="notes" id="l_notes" class="form-control" rows="2" placeholder="Optional, e.g. keep refrigerated 2–8°C"></textarea></div>
                 </div>
@@ -398,7 +526,7 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
             </div>
             <div class="xfer-stats">
                 <div class="sum-chip"><span>Stored here</span><strong id="xAvail">0</strong></div>
-                <div class="sum-chip"><span>Total (all locations)</span><strong id="xTotal">0</strong></div>
+                <div class="sum-chip"><span>In pharmacy stock</span><strong id="xTotal">0</strong></div>
             </div>
             <div class="form-grid">
                 <div class="form-group" style="grid-column:span 2"><label class="form-label">Transfer To *</label>
@@ -425,6 +553,43 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
     </div>
 </div>
 
+<!-- ── LOCK / UNLOCK LOCATION ────────────────────────────── -->
+<div class="modal-overlay" id="lockModal">
+    <div class="modal" style="max-width:620px">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title"><i class="fas fa-lock" id="lkIcon"></i><span id="lkTitle">Lock Location</span></div>
+                <div class="modal-sub" id="lkSub"></div>
+            </div>
+            <button class="modal-close" onclick="closeModal('lockModal')"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <div id="lkInfo"></div>
+            <div class="meds-summary" id="lkSummary"></div>
+            <div class="lk-list" id="lkList"></div>
+            <div class="form-grid">
+                <div class="form-group" id="lkReasonWrap" style="grid-column:span 2">
+                    <label class="form-label">Reason *</label>
+                    <select id="lkReason" class="form-control" onchange="lkSync()">
+                        <option value="">Select a reason…</option>
+                        {% for val,label in lock_reasons %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="form-group" style="grid-column:span 2">
+                    <label class="form-label" id="lkNotesLbl">Notes</label>
+                    <textarea id="lkNotes" class="form-control" rows="2" maxlength="500" oninput="lkSync()" placeholder="e.g. Quarterly count, reference no., who requested it"></textarea>
+                </div>
+            </div>
+            <label class="lk-confirm"><input type="checkbox" id="lkConfirm" onchange="lkSync()"><span id="lkConfirmTxt"></span></label>
+            <div class="info-note teal" style="margin-top:14px"><i class="fas fa-circle-info"></i><span id="lkHintTxt"></span></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="closeModal('lockModal')">Cancel</button>
+            <button type="button" class="btn-danger" id="lkSubmit" onclick="submitLock()" disabled>Lock</button>
+        </div>
+    </div>
+</div>
+
 <!-- ── DISCARD LAYOUT CHANGES ────────────────────────────── -->
 <div class="modal-overlay" id="discardModal">
     <div class="modal modal-sm">
@@ -440,6 +605,53 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
     </div>
 </div>
 
+{% endif %}
+
+{% if can_stock_in %}
+<!-- ── STOCK IN (into one location) ──────────────────────── -->
+<div class="modal-overlay" id="stockInModal">
+    <div class="modal" style="max-width:560px">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title"><i class="fas fa-arrow-circle-down" style="color:#16a34a"></i>Stock In</div>
+                <div class="modal-sub" id="siSub"></div>
+            </div>
+            <button class="modal-close" onclick="closeModal('stockInModal')"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group si-pick" style="margin-bottom:6px">
+                <label class="form-label">Medicine *</label>
+                <div class="search-box" style="width:100%"><i class="fas fa-search"></i>
+                    <input type="text" id="siSearch" placeholder="Search name, generic, barcode…" autocomplete="off" oninput="siSearch(this.value)" style="width:100%"></div>
+                <div class="si-results" id="siResults"></div>
+            </div>
+            <div class="si-chosen" id="siChosen"><span id="siChosenTxt"></span><button type="button" class="btn-icon sm delete" onclick="siClear()" title="Change medicine"><i class="fas fa-xmark"></i></button></div>
+
+            <div class="si-batches" id="siBatches">
+                <div class="si-batches-title"><i class="fas fa-layer-group"></i> Existing batches in this location — click one to add to it</div>
+                <div id="siBatchItems"></div>
+            </div>
+
+            <div class="info-note" id="siSoNote" style="display:none;background:rgba(59,91,219,.08);border-color:rgba(59,91,219,.25);color:#2b3f9e"><i class="fas fa-building" style="color:#3b5bdb"></i><span>Supply Office: this delivery will <strong>not</strong> be counted in pharmacy stock.</span></div>
+
+            <div class="form-grid" style="margin-top:14px">
+                <div class="form-group"><label class="form-label">Quantity *</label><input type="number" id="siQty" class="form-control" min="1" value="1"></div>
+                <div class="form-group"><label class="form-label">Purchase Price/unit (₱)</label><input type="number" id="siPrice" class="form-control" step="0.01" min="0" placeholder="0.00"></div>
+                <div class="form-group"><label class="form-label">Batch Number *</label><input type="text" id="siBatch" class="form-control" placeholder="Pick a batch above or type a new one" oninput="siBatchTyped()"></div>
+                <div class="form-group"><label class="form-label">Expiry Date *</label><input type="date" id="siExpiry" class="form-control" onchange="siHint()"></div>
+                <div class="si-hint" id="siHint" style="grid-column:span 2"></div>
+                <div class="form-group" style="grid-column:span 2"><label class="form-label">Supplier</label>
+                    <select id="siSupplier" class="form-control"><option value="">— Select —</option>{% for s in suppliers %}<option value="{{ s.pk }}">{{ s.name }}</option>{% endfor %}</select></div>
+                <div class="form-group" style="grid-column:span 2"><label class="form-label">Reference / DR No.</label><input type="text" id="siRef" class="form-control" maxlength="100" placeholder="Delivery receipt or PO number"></div>
+                <div class="form-group" style="grid-column:span 2"><label class="form-label">Notes</label><textarea id="siNotes" class="form-control" rows="2" maxlength="500" placeholder="Optional remarks…"></textarea></div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="siBack()">Back</button>
+            <button type="button" class="btn-stockin" id="siSubmit" onclick="siSubmit()"><i class="fas fa-plus-circle" style="margin-right:5px"></i>Record Stock In</button>
+        </div>
+    </div>
+</div>
 {% endif %}
 
 <!-- ── DELETE ────────────────────────────────────────────── -->
@@ -471,6 +683,7 @@ var PLAN    = JSON.parse(document.getElementById('plan-data').textContent);
 var INITIAL = JSON.parse(document.getElementById('plan-initial').textContent);
 var CAN_MANAGE = {% if can_manage %}true{% else %}false{% endif %};
 var CAN_ADMIN  = {% if can_admin %}true{% else %}false{% endif %};
+var CAN_STOCK_IN = {% if can_stock_in %}true{% else %}false{% endif %};
 var CSRF = '{{ csrf_token }}';
 var URLS = {
     inventory:     "{% url 'inventory' %}",
@@ -484,6 +697,10 @@ var URLS = {
     loc_update:    "{% url 'storage_location_update' pk=0 %}",
     loc_delete:    "{% url 'storage_location_delete' pk=0 %}",
     transfer:      "{% url 'storage_location_transfer' %}",
+    lock:          "{% url 'storage_location_lock' pk=0 %}",
+    stock_in:      "{% url 'storage_location_stock_in' pk=0 %}",
+    med_search:    "{% url 'medicine_search_ajax' %}",
+    med_info:      "{% url 'stock_medicine_info' %}",
 };
 function u(tpl, pk) { var i = tpl.lastIndexOf('/0/'); return tpl.slice(0, i) + '/' + pk + '/' + tpl.slice(i + 3); }
 function esc(s) {
@@ -524,7 +741,7 @@ document.addEventListener('keydown', function(e) {
 function renderTabs() {
     var html = PLAN.map(function(a) {
         return '<button type="button" class="area-tab' + (a.id === state.areaId ? ' active' : '') + '" onclick="selectArea(' + a.id + ')">' +
-               esc(a.name) + '<span class="tab-count">' + shelvesIn(a).length + '</span></button>';
+               esc(a.name) + (a.locations.some(function(l) { return l.locked; }) ? ' <i class="fas fa-lock tab-lock" title="Has locked locations"></i>' : '') + '<span class="tab-count">' + shelvesIn(a).length + '</span></button>';
     }).join('');
     if (CAN_MANAGE) html += '<button type="button" class="area-tab add" onclick="openAreaModal(false)"><i class="fas fa-plus"></i> Add Area</button>';
     document.getElementById('areaTabs').innerHTML = html;
@@ -581,7 +798,7 @@ function renderCanvas() {
         var el = document.createElement('div');
         var cls = 'shelf';
         if (l.kind === 'landmark') cls += ' landmark';
-            else { if (l.count) cls += ' has-meds'; if (l.alert) cls += ' alert'; if (l.expiring) cls += ' expiring'; }
+            else { if (l.count) cls += ' has-meds'; if (l.alert) cls += ' alert'; if (l.expiring) cls += ' expiring'; if (l.locked) cls += ' locked'; if (l.supply_office) cls += ' supply';}
         el.className = cls;
         el.id = 'shelf-' + l.id;
         el.dataset.id = l.id;
@@ -589,11 +806,17 @@ function renderCanvas() {
         var inner = '<span class="shelf-code">' + esc(l.code) + '</span>';
         if (l.name && l.name !== l.code) inner += '<span class="shelf-name">' + esc(l.name) + '</span>';
         if (l.kind === 'shelf') {
-            inner += '<span class="shelf-count' + (l.count ? (l.alert ? ' warn' : '') : ' empty') + '">' +
+            inner += '<span class="shelf-count' + (l.count ? (l.locked ? ' locked' : (l.supply_office ? ' supply' : (l.alert ? ' warn' : ''))) : ' empty') + '">' +
                      l.count + ' med' + (l.count === 1 ? '' : 's') + '</span>';
         }
         if (l.kind === 'shelf' && l.expiring) {
             inner += '<span class="shelf-flag" title="' + l.expiring + ' medicine(s) expiring soon or expired"><i class="fas fa-hourglass-half"></i> ' + l.expiring + '</span>';
+        }
+        if (l.kind === 'shelf' && l.locked) {
+            inner += '<span class="shelf-lock" title="Locked — ' + esc(l.lock_reason) + '"><i class="fas fa-lock"></i></span>';
+        }
+        if (l.kind === 'shelf' && l.supply_office) {
+            inner += '<span class="shelf-so" title="Supply Office — not counted in pharmacy stock"><i class="fas fa-building"></i></span>';
         }
         el.innerHTML = inner;
         if (state.edit) {
@@ -618,6 +841,11 @@ function placeShelf(el, l) {
 
 function renderList() {
     var a = curArea(), list = document.getElementById('locList');
+    var lkN = 0;
+    PLAN.forEach(function(p) { p.locations.forEach(function(l) { if (l.locked) lkN++; }); });
+    var lb = document.getElementById('lockBadge');
+    lb.style.display = lkN ? '' : 'none';
+    lb.innerHTML = '<i class="fas fa-lock" style="font-size:9px"></i> ' + lkN + ' locked';
     document.getElementById('sideCount').textContent = a ? a.locations.length : 0;
     document.getElementById('areaBadge').textContent = a ? (shelvesIn(a).length + ' storage location' + (shelvesIn(a).length === 1 ? '' : 's')) : '—';
     if (!a || !a.locations.length) {
@@ -630,13 +858,18 @@ function renderList() {
             : '<span class="loc-pill' + (l.count ? (l.alert ? ' warn' : '') : ' zero') + '">' + l.count + '</span>';
         var expPill = (l.kind === 'shelf' && l.expiring)
             ? '<span class="loc-pill exp" title="Expiring soon / expired"><i class="fas fa-hourglass-half" style="font-size:9px"></i> ' + l.expiring + '</span>' : '';
+        var lockPill = (l.kind === 'shelf' && l.locked)
+            ? '<span class="loc-pill lock" title="Locked — ' + esc(l.lock_reason) + '"><i class="fas fa-lock" style="font-size:9px"></i></span>' : '';
+        var soPill = (l.kind === 'shelf' && l.supply_office)
+            ? '<span class="loc-pill so" title="Supply Office"><i class="fas fa-building" style="font-size:9px"></i></span>' : '';    
         var btns = '';
+        if (CAN_MANAGE && l.kind === 'shelf') btns += '<button type="button" class="btn-icon sm ' + (l.locked ? 'unlock' : 'lock') + '" title="' + (l.locked ? 'Unlock' : 'Lock') + '" onclick="event.stopPropagation();openLockModal(' + l.id + ')"><i class="fas fa-' + (l.locked ? 'lock-open' : 'lock') + '"></i></button>';
         if (CAN_MANAGE) btns += '<button type="button" class="btn-icon edit sm" title="Edit" onclick="event.stopPropagation();openLocModal(' + l.id + ')"><i class="fas fa-pen-to-square"></i></button>';
         if (CAN_ADMIN)  btns += '<button type="button" class="btn-icon delete sm" title="Remove" onclick="event.stopPropagation();openDeleteLoc(' + l.id + ')"><i class="fas fa-trash-can"></i></button>';
         return '<div class="loc-item" data-id="' + l.id + '" onclick="listClick(' + l.id + ')" onmouseenter="hlShelf(' + l.id + ',true)" onmouseleave="hlShelf(' + l.id + ',false)">' +
                '<div class="loc-item-main"><div class="loc-item-code">' + esc(l.code) + '</div>' +
                '<div class="loc-item-sub">' + esc(l.name || (l.kind === 'landmark' ? 'Not a storage location' : 'No display name')) + '</div></div>' +
-               expPill + pill + btns + '</div>';
+               lockPill + soPill + expPill + pill + btns + '</div>';
     }).join('');
 }
 
@@ -673,6 +906,19 @@ function openMeds(id) {
     document.getElementById('medsSummary').innerHTML = '';
     document.getElementById('medsNotes').innerHTML = l.notes ? '<div class="loc-notes"><i class="fas fa-note-sticky"></i> ' + esc(l.notes) + '</div>' : '';
     document.getElementById('medsFilter').value = '';
+    document.getElementById('medsLock').innerHTML = (l.supply_office ? soBannerHtml() : '') + (l.locked ? lockBannerHtml(l) : '');
+    var lkb = document.getElementById('medsLockBtn');
+    if (lkb) {
+        lkb.innerHTML = l.locked ? '<i class="fas fa-lock-open"></i> Unlock' : '<i class="fas fa-lock"></i> Lock';
+        lkb.onclick = function() { openLockModal(id); };
+    }
+    var sib = document.getElementById('medsStockIn');
+    if (sib) {
+        sib.style.display = l.locked ? 'none' : '';
+        sib.onclick = function() { openStockIn(); };
+    }
+    var cpb = document.getElementById('medsCompare');
+    if (cpb) cpb.onclick = function() { closeModal('medsModal'); openCompare(id); };
     document.getElementById('medsList').innerHTML = '<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading…</p></div>';
 
     var edit = document.getElementById('medsEdit'), del = document.getElementById('medsDelete');
@@ -708,16 +954,17 @@ function renderMeds(q) {
         return !q || (m.name + ' ' + m.generic + ' ' + m.brand + ' ' + m.strength).toLowerCase().indexOf(q) !== -1;
     });
     var box = document.getElementById('medsList');
+    var curLoc = locById(state.currentLoc), isLocked = !!(curLoc && curLoc.locked), isSO = !!(curLoc && curLoc.supply_office);
     if (!rows.length) {
         box.innerHTML = '<div class="empty-state"><i class="fas fa-pills"></i><p>' +
             (state.medsRows.length ? 'No medicines match your filter.' : 'No medicines are stored here yet.<br>Assign this location when adding or editing a medicine in Inventory, or transfer stock here from another location.') + '</p></div>';
         return;
     }
-    var html = '<table class="data-table"><thead><tr><th>Medicine</th><th>Form</th><th>Stored Here</th><th>Status</th><th>Earliest Expiry</th>' + (CAN_MANAGE ? '<th></th>' : '') + '</tr></thead><tbody>';
+    var html = '<table class="data-table"><thead><tr><th>Medicine</th><th>Form</th><th>Stored Here</th><th>Status</th><th>Earliest Expiry</th>' + ((CAN_MANAGE || CAN_STOCK_IN) ? '<th></th>' : '') + '</tr></thead><tbody>';
     rows.forEach(function(m) {
         var cls = m.status === 'out' ? 'out-stock' : (m.status === 'low' ? 'low-stock' : 'in-stock');
         var txt = m.status === 'out' ? 'Out of Stock' : (m.status === 'low' ? 'Low Stock' : 'In Stock');
-        var color = m.status === 'out' ? '#dc2626' : (m.status === 'low' ? '#d97706' : '#16a34a');
+        var color = isSO ? '#3b5bdb' : (isLocked ? '#475569' : (m.status === 'out' ? '#dc2626' : (m.status === 'low' ? '#d97706' : '#16a34a')));
         var sub = [m.generic, m.brand, m.strength].filter(Boolean).join(' · ');
         var expHtml = !m.expiry ? '<span style="font-size:11.5px;color:#b0bec5">No expiry set</span>'
             : '<span class="expiry-badge ' + m.expiry_state + '">' +
@@ -727,11 +974,16 @@ function renderMeds(q) {
                 '<div class="med-sub">' + esc(sub) + '</div></td>' +
                 '<td style="color:#64748b">' + esc(m.form || '—') + '</td>' +
                 '<td><span style="font-weight:700;color:' + color + '">' + esc(m.qty) + '</span>' +
-                    (m.total !== m.qty ? '<div class="med-sub">of ' + esc(m.total) + ' total</div>' : '') + '</td>' +
-                '<td><span class="stock-badge ' + cls + '"><span class="stock-dot"></span>' + txt + '</span></td>' +
+                    ((isLocked || isSO) ? '<div class="med-sub">' + esc(m.total) + ' in pharmacy stock</div>'
+                          : (m.total !== m.qty ? '<div class="med-sub">of ' + esc(m.total) + ' total</div>' : '')) + '</td>' +
+                '<td>' + (isSO ? '<span class="stock-badge so-badge"><i class="fas fa-building" style="font-size:9px"></i> Supply Office</span>'
+                       : isLocked ? '<span class="stock-badge lock-badge2"><i class="fas fa-lock" style="font-size:9px"></i> Locked</span>'
+                       : '<span class="stock-badge ' + cls + '"><span class="stock-dot"></span>' + txt + '</span>') + '</td>' +
                 '<td>' + expHtml + '</td>' +
-                (CAN_MANAGE ? '<td style="text-align:right">' + (m.qty > 0
-                    ? '<button type="button" class="btn-soft sm" onclick="openTransfer(' + m.id + ')"><i class="fas fa-right-left"></i> Transfer</button>' : '') + '</td>' : '') +
+                    ((CAN_MANAGE || CAN_STOCK_IN) ? '<td style="text-align:right;white-space:nowrap">' +
+                    ((CAN_STOCK_IN && !isLocked) ? '<button type="button" class="btn-soft sm" style="margin-right:4px;color:#16a34a;border-color:rgba(22,163,74,.3);background:rgba(22,163,74,.08)" onclick="openStockIn(' + m.id + ')"><i class="fas fa-plus"></i> Stock In</button>' : '') +
+                    ((CAN_MANAGE && (m.rel != null ? m.rel : m.qty) > 0)
+                        ? '<button type="button" class="btn-soft sm" onclick="openTransfer(' + m.id + ')"><i class="fas fa-right-left"></i> ' + (isSO ? 'Issue' : (isLocked ? 'Move out' : 'Transfer')) + '</button>' : '') + '</td>' : '') +
                 '</tr>';
     });
     box.innerHTML = html + '</tbody></table>';
@@ -739,6 +991,13 @@ function renderMeds(q) {
 function filterMeds(q) { renderMeds(q); }
 
 /* ── Add / Edit location ───────────────────────────────── */
+function syncSo() {
+    var shelf = document.getElementById('l_kind').value === 'shelf';
+    document.getElementById('l_so_wrap').style.display = shelf ? '' : 'none';
+    if (!shelf) document.getElementById('l_so').checked = false;
+}
+
+
 function openLocModal(id) {
     if (!CAN_MANAGE) return;
     var l = id ? locById(id) : null;
@@ -758,6 +1017,7 @@ function openLocModal(id) {
         document.getElementById('l_name').value  = l.name || '';
         document.getElementById('l_kind').value  = l.kind;
         document.getElementById('l_notes').value = l.notes || '';
+        document.getElementById('l_so').checked = !!l.supply_office;
     } else {
         form.action = URLS.loc_create;
         document.getElementById('locModalTitle').textContent = 'Add Storage Location';
@@ -767,6 +1027,7 @@ function openLocModal(id) {
         sel.value = state.areaId;
         form.reset(); sel.value = state.areaId;
     }
+    syncSo();
     openModal('locModal');
     setTimeout(function() { document.getElementById('l_code').focus(); }, 50);
 }
@@ -801,14 +1062,14 @@ function openTransfer(medId) {
     var m = null, src = locById(state.currentLoc);
     state.medsRows.forEach(function(r) { if (r.id === medId) m = r; });
     if (!m || !src) return;
-    xfer = { med: m, from: src, avail: Number(m.qty) || 0 };
+    xfer = { med: m, from: src, avail: Number(m.rel != null ? m.rel : m.qty) || 0 };
 
     var html = '', n = 0;
     PLAN.forEach(function(a) {
-        var opts = a.locations.filter(function(l) { return l.kind === 'shelf' && l.id !== src.id; });
+        var opts = a.locations.filter(function(l) { return l.kind === 'shelf' && l.id !== src.id && !l.locked; });
         if (!opts.length) return;
         html += '<optgroup label="' + esc(a.name) + '">' + opts.map(function(l) {
-            n++; return '<option value="' + l.id + '">' + esc(l.code) + (l.name && l.name !== l.code ? ' — ' + esc(l.name) : '') + '</option>';
+                        n++; return '<option value="' + l.id + '">' + esc(l.code) + (l.name && l.name !== l.code ? ' — ' + esc(l.name) : '') + (l.supply_office ? ' (Supply Office)' : '') + '</option>';
         }).join('') + '</optgroup>';
     });
     if (!n) { showToast('Add another storage location first.', 'error'); return; }
@@ -839,9 +1100,16 @@ function updateXferPreview() {
     document.getElementById('xGetLbl').textContent  = (dst ? dst.code : 'Destination') + ' receives';
     document.getElementById('xKeep').textContent = bad ? '—' : (xfer.avail - q);
     document.getElementById('xGet').textContent  = bad ? '—' : q;
+    var inPh = function(x) { return x && !x.locked && !x.supply_office; };
+    var delta = (inPh(dst) ? q : 0) - (inPh(xfer.from) ? q : 0);
+    var tot = Number(xfer.med ? xfer.med.total : 0);
     document.getElementById('xTotalNote').textContent = bad
         ? 'Only ' + xfer.avail + ' unit(s) are stored in ' + (xfer.from ? xfer.from.code : 'this location') + '.'
-        : 'Total stock stays at ' + (xfer.med ? xfer.med.total : 0) + ' — nothing is added or removed.';
+        : (delta > 0
+            ? 'Pharmacy stock goes from ' + tot + ' to ' + (tot + delta) + (xfer.from.supply_office ? ' — issued from Supply Office and logged as a pharmacy receipt.' : ' — these units leave the lock and can be dispensed.')
+            : delta < 0
+                ? 'Pharmacy stock goes from ' + tot + ' to ' + (tot + delta) + ' — these units move out of the pharmacy.'
+                : 'Pharmacy stock stays at ' + tot + ' — nothing is added or removed.');
 }
 
 function submitTransfer() {
@@ -870,6 +1138,7 @@ function submitTransfer() {
 /* ── Delete ────────────────────────────────────────────── */
 function openDeleteLoc(id) {
     var l = locById(id); if (!l) return;
+    if (l.locked) { showToast('Unlock "' + l.code + '" before removing it.', 'error'); return; }
     document.getElementById('deleteForm').action = u(URLS.loc_delete, id);
     document.getElementById('deleteTitle').textContent = 'Remove Location';
     document.getElementById('deleteMsg').innerHTML = 'Remove <strong>' + esc(l.code) + '</strong> from the floor plan?' +
@@ -1037,8 +1306,8 @@ function debounceFind(q) {
                 } else {
                     box.innerHTML = d.results.map(function(r) {
                         return '<div class="find-item" onclick="goToLoc(' + r.area_id + ',' + r.loc_id + ')">' +
-                               '<div>' + esc(r.name) + '<small>' + esc(r.strength) + ' · ' + esc(r.area) + ' · ' + r.qty + ' pcs</small></div>' +
-                               '<span class="find-loc">' + esc(r.code) + '</span></div>';
+                               '<div>' + esc(r.name) + '<small>' + esc(r.strength) + ' · ' + esc(r.area) + ' · ' + r.qty + ' pcs' + (r.supply_office ? ' · Supply Office' : '') + (r.locked ? ' · locked' : '') + '</small></div>' +
+                               '<span class="find-loc">' + (r.locked ? '<i class="fas fa-lock" style="font-size:9px"></i> ' : '') + esc(r.code) + '</span></div>';
                     }).join('');
                 }
                 box.classList.add('open');
@@ -1053,6 +1322,418 @@ function goToLoc(areaId, locId) {
 document.addEventListener('click', function(e) {
     var w = document.querySelector('.find-wrap');
     if (w && !w.contains(e.target)) document.getElementById('findResults').classList.remove('open');
+});
+
+/* ── Lock / unlock a location ──────────────────────────── */
+var lk = { id: null, mode: 'lock', loaded: false, rows: [] };
+
+function lockBannerHtml(l) {
+    return '<div class="lock-banner"><i class="fas fa-lock"></i><div><strong>Locked — ' + esc(l.lock_reason) + '.</strong> ' +
+           'Medicines here are held out of the available stock: they can’t be dispensed, adjusted or received into. ' +
+           'Unlock the location, or transfer medicines to an unlocked location.' +
+           '<div class="lock-meta">' + (l.locked_by ? 'Locked by ' + esc(l.locked_by) : '') + (l.locked_at ? ' · ' + esc(l.locked_at) : '') + '</div>' +
+           (l.lock_notes ? '<div class="lock-meta">Notes: ' + esc(l.lock_notes) + '</div>' : '') + '</div></div>';
+}
+
+function soBannerHtml() {
+    return '<div class="lock-banner" style="background:rgba(59,91,219,.06);border-color:rgba(59,91,219,.25);color:#2b3f9e"><i class="fas fa-building" style="color:#3b5bdb"></i><div><strong>Supply Office storage.</strong> Stock here is held separately. It is not counted in pharmacy stock and can’t be dispensed. Use <strong>Issue</strong> to transfer it to a pharmacy location.</div></div>';
+}
+
+function openLockModal(id) {
+    if (!CAN_MANAGE) return;
+    if (state.edit) { showToast('Save or cancel your layout changes first.', 'error'); return; }
+    var l = locById(id), a = areaOfLoc(id);
+    if (!l || l.kind !== 'shelf') return;
+    var locking = !l.locked;
+    lk = { id: id, mode: locking ? 'lock' : 'unlock', loaded: false, rows: [] };
+
+    document.getElementById('lkIcon').className = 'fas ' + (locking ? 'fa-lock' : 'fa-lock-open');
+    document.getElementById('lkTitle').textContent = (locking ? 'Lock ' : 'Unlock ') + l.code;
+    document.getElementById('lkSub').textContent = (a ? a.name : '') + (l.name && l.name !== l.code ? ' · ' + l.name : '');
+    document.getElementById('lkInfo').innerHTML = locking ? '' : lockBannerHtml(l);
+    document.getElementById('lkReasonWrap').style.display = locking ? '' : 'none';
+    document.getElementById('lkReason').value = '';
+    document.getElementById('lkNotes').value = '';
+    document.getElementById('lkNotesLbl').textContent = locking ? 'Notes (required if the reason is “Other”)' : 'Notes (optional)';
+    document.getElementById('lkConfirm').checked = false;
+    document.getElementById('lkConfirmTxt').textContent = locking
+        ? 'I understand these medicines will be held out of available stock and can’t be dispensed, received or transferred into this location until it is unlocked.'
+        : 'I have checked this location and confirm its medicines can go back to available stock.';
+    document.getElementById('lkHintTxt').textContent = locking
+        ? 'Every affected batch is logged in the stock ledger (adjustment, ref LOCK). To release stock later you can unlock the location or transfer the medicines to an unlocked one.'
+        : 'Every affected batch is logged in the stock ledger (adjustment, ref UNLOCK). Batches on Do Not Release stay on hold.';
+    var sb = document.getElementById('lkSubmit');
+    sb.className = locking ? 'btn-danger' : 'btn-submit';
+    sb.innerHTML = locking ? '<i class="fas fa-lock" style="margin-right:5px"></i>Lock Location'
+                           : '<i class="fas fa-lock-open" style="margin-right:5px"></i>Unlock Location';
+    document.getElementById('lkSummary').innerHTML = '';
+    document.getElementById('lkList').innerHTML = '<div class="empty-state" style="padding:20px"><i class="fas fa-spinner fa-spin"></i><p>Checking what’s stored here…</p></div>';
+    lkSync();
+    closeModal('medsModal');
+    openModal('lockModal');
+
+    fetch(u(URLS.meds, id), { credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) { lk.rows = d.medicines || []; lk.loaded = true; renderLockImpact(); lkSync(); })
+        .catch(function() {
+            document.getElementById('lkList').innerHTML = '<div class="empty-state" style="padding:20px"><i class="fas fa-triangle-exclamation"></i><p>Could not load medicines.</p></div>';
+        });
+}
+
+function renderLockImpact() {
+    var so = !!(locById(lk.id) || {}).supply_office;
+    var locking = lk.mode === 'lock', units = 0, meds = 0, zero = 0, held = 0, rows = '';
+    lk.rows.forEach(function(m) {
+        var qty = Number(m.qty) || 0, rel = Number(m.rel != null ? m.rel : m.qty) || 0, total = Number(m.total) || 0;
+        held += qty - rel;
+        if (rel <= 0) return;
+        units += rel; meds++;
+        var after = so ? total : (locking ? Math.max(total - rel, 0) : total + rel);
+        if (!so && locking && after === 0) zero++;
+        rows += '<div class="lk-row"><div class="lk-main"><div class="med-name">' + esc(m.name) + '</div><div class="med-sub">' + esc([m.strength, m.form].filter(Boolean).join(' · ')) + '</div></div>' +
+                '<div class="lk-delta' + (locking && after === 0 ? ' bad' : (!locking ? ' good' : '')) + '">' +
+                (locking ? '−' : '+') + rel + ' here<br>available ' + total + ' → ' + after + (locking && after === 0 ? ' (out of stock)' : '') + '</div></div>';
+    });
+    document.getElementById('lkSummary').innerHTML =
+        '<div class="sum-chip"><strong>' + meds + '</strong> medicine' + (meds === 1 ? '' : 's') + '</div>' +
+        '<div class="sum-chip"><strong>' + units + '</strong> unit' + (units === 1 ? '' : 's') + (locking ? ' to hold' : ' to release') + '</div>' +
+        (zero ? '<div class="sum-chip danger"><strong>' + zero + '</strong> will have no available stock</div>' : '') +
+        (held ? '<div class="sum-chip"><strong>' + held + '</strong> already on Do Not Release</div>' : '');
+    document.getElementById('lkList').innerHTML = rows ||
+        '<div class="empty-state" style="padding:20px"><i class="fas fa-box-open"></i><p>' +
+        (lk.rows.length ? 'Only Do Not Release stock is stored here.' : 'No medicines are stored here.') +
+        (locking ? '<br>Locking still blocks receiving or transferring stock into it.' : '') + '</p></div>';
+
+    if (so) document.getElementById('lkHintTxt').textContent = 'Supply Office stock is already outside pharmacy stock, so locking changes no balances. It only blocks receiving and transfers into it.';
+}
+
+function lkSync() {
+    var ok = lk.loaded && document.getElementById('lkConfirm').checked;
+    if (lk.mode === 'lock') {
+        var r = document.getElementById('lkReason').value;
+        ok = ok && !!r && (r !== 'other' || document.getElementById('lkNotes').value.trim().length > 0);
+    }
+    document.getElementById('lkSubmit').disabled = !ok;
+}
+
+function submitLock() {
+    var btn = document.getElementById('lkSubmit');
+    btn.disabled = true;
+    fetch(u(URLS.lock, lk.id), {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: lk.mode, reason: document.getElementById('lkReason').value,
+                               notes: document.getElementById('lkNotes').value })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+        if (d.ok) {
+            var a = areaOfLoc(lk.id);
+            window.location.href = window.location.pathname + '?area=' + (a ? a.id : '') + '&open=' + lk.id;
+        } else { btn.disabled = false; showToast(d.error || 'Could not update the lock.', 'error'); }
+    })
+    .catch(function() { btn.disabled = false; showToast('Network error.', 'error'); });
+}
+
+/* ── Compare locations side by side ─────────────────────── */
+var CMP_MAX = 3;
+var cmp = { panes: [], cache: {} };      // pane = { areaId, locId }
+
+function cmpOtherArea(not) {
+    for (var i = 0; i < PLAN.length; i++) if (PLAN[i].id !== not && shelvesIn(PLAN[i]).length) return PLAN[i].id;
+    return not;
+}
+function openCompare(locId) {
+    if (!PLAN.length) { showToast('There are no areas to compare yet.', 'error'); return; }
+    var l = locId ? locById(locId) : null, a = l ? areaOfLoc(locId) : curArea();
+    var a1 = a ? a.id : PLAN[0].id;
+    cmp.panes = [ { areaId: a1, locId: l ? l.id : null }, { areaId: cmpOtherArea(a1), locId: null } ];
+    cmp.cache = {};
+    document.getElementById('cmpFilter').value = '';
+    document.getElementById('cmpCommon').checked = false;
+    renderCompare();
+    openModal('cmpModal');
+    if (l) cmpLoad(l.id);
+}
+function cmpLoad(id) {
+    if (!id || cmp.cache[id]) return;
+    cmp.cache[id] = { loading: true };
+    fetch(u(URLS.meds, id), { credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) { cmp.cache[id] = d; renderCompare(); })
+        .catch(function() { cmp.cache[id] = { error: true }; renderCompare(); });
+}
+function cmpSetArea(i, areaId) { cmp.panes[i] = { areaId: Number(areaId), locId: null }; renderCompare(); }
+function cmpSetLoc(i, locId) {
+    var id = locId ? Number(locId) : null;
+    cmp.panes[i].locId = id;
+    renderCompare();
+    if (id) cmpLoad(id);
+}
+function cmpAddPane() {
+    if (cmp.panes.length >= CMP_MAX) return;
+    var last = cmp.panes[cmp.panes.length - 1];
+    cmp.panes.push({ areaId: last ? last.areaId : PLAN[0].id, locId: null });
+    renderCompare();
+}
+function cmpRemovePane(i) { if (cmp.panes.length > 2) { cmp.panes.splice(i, 1); renderCompare(); } }
+
+function cmpExpiry(m) {
+    if (!m.expiry) return '<span style="font-size:11.5px;color:#b0bec5">No expiry set</span>';
+    return '<span class="expiry-badge ' + m.expiry_state + '">' +
+           (m.expiry_state !== 'ok' ? '<i class="fas fa-hourglass-half" style="font-size:9px"></i> ' : '') + esc(m.expiry) + '</span>';
+}
+
+function renderCompare() {
+    var grid = document.getElementById('cmpGrid');
+    var q = (document.getElementById('cmpFilter').value || '').toLowerCase().trim();
+    var commonOnly = document.getElementById('cmpCommon').checked;
+    grid.style.setProperty('--n', cmp.panes.length);
+    document.getElementById('cmpAdd').style.display = cmp.panes.length >= CMP_MAX ? 'none' : '';
+
+    var presence = {};      // medicine id -> pane indexes that hold it
+    cmp.panes.forEach(function(p, i) {
+        var d = p.locId ? cmp.cache[p.locId] : null;
+        if (d && d.medicines) d.medicines.forEach(function(m) { (presence[m.id] = presence[m.id] || []).push(i); });
+    });
+    grid.innerHTML = cmp.panes.map(function(p, i) { return cmpPaneHtml(p, i, q, commonOnly, presence); }).join('');
+}
+
+function cmpPaneHtml(p, i, q, commonOnly, presence) {
+    var areaOpts = PLAN.map(function(a) {
+        return '<option value="' + a.id + '"' + (a.id === p.areaId ? ' selected' : '') + '>' + esc(a.name) + '</option>';
+    }).join('');
+    var area = areaById(p.areaId);
+    var locOpts = '<option value="">Select location…</option>' + (area ? shelvesIn(area) : []).map(function(l) {
+        return '<option value="' + l.id + '"' + (l.id === p.locId ? ' selected' : '') + '>' + esc(l.code) +
+               (l.name && l.name !== l.code ? ' — ' + esc(l.name) : '') + (l.supply_office ? ' — Supply Office' : '') + (l.locked ? ' (locked)' : '') + '</option>';
+    }).join('');
+    var head = '<div class="cmp-pane-head"><select class="form-control" onchange="cmpSetArea(' + i + ',this.value)">' + areaOpts + '</select>' +
+               '<select class="form-control" onchange="cmpSetLoc(' + i + ',this.value)">' + locOpts + '</select>' +
+               (cmp.panes.length > 2 ? '<button type="button" class="btn-icon delete sm" title="Remove pane" onclick="cmpRemovePane(' + i + ')"><i class="fas fa-xmark"></i></button>' : '') + '</div>';
+
+    var l = p.locId ? locById(p.locId) : null, d = p.locId ? cmp.cache[p.locId] : null, body;
+    if (!l) {
+        body = '<div class="cmp-empty"><i class="fas fa-table-columns" style="display:block;font-size:28px;margin-bottom:8px;color:#d1d9e0"></i>Choose an area and a location.</div>';
+    } else if (!d || d.loading) {
+        body = '<div class="cmp-empty"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+    } else if (d.error) {
+        body = '<div class="cmp-empty"><i class="fas fa-triangle-exclamation"></i> Could not load this location.</div>';
+    } else {
+        var meds = d.medicines || [], units = 0;
+        meds.forEach(function(m) { units += Number(m.qty) || 0; });
+        var rows = meds.filter(function(m) {
+            if (q && (m.name + ' ' + m.generic + ' ' + m.brand + ' ' + m.strength).toLowerCase().indexOf(q) === -1) return false;
+            if (commonOnly && (presence[m.id] || []).length < 2) return false;
+            return true;
+        });
+        body = (l.locked ? '<div class="lock-banner" style="margin-bottom:10px"><i class="fas fa-lock"></i><div><strong>Locked — ' + esc(l.lock_reason) + '</strong>' +
+                           '<div class="lock-meta">' + (l.locked_by ? esc(l.locked_by) : '') + (l.locked_at ? ' · ' + esc(l.locked_at) : '') + '</div></div></div>' : '') +
+               '<div class="meds-summary" style="margin-bottom:10px"><div class="sum-chip"><strong>' + meds.length + '</strong> medicine' + (meds.length === 1 ? '' : 's') + '</div>' +
+               '<div class="sum-chip"><strong>' + units + '</strong> units</div></div>';
+        if (!rows.length) {
+            body += '<div class="cmp-empty"><i class="fas fa-pills"></i> ' + (meds.length ? 'No medicines match.' : 'Nothing stored here.') + '</div>';
+        } else {
+            body += '<table class="data-table"><thead><tr><th>Medicine</th><th>Stored</th><th>Expiry</th></tr></thead><tbody>' + rows.map(function(m) {
+                var others = (presence[m.id] || []).filter(function(j) { return j !== i; });
+                var also = others.map(function(j) {
+                    var o = cmp.panes[j], od = cmp.cache[o.locId], ol = locById(o.locId), q2 = 0;
+                    (od.medicines || []).forEach(function(x) { if (x.id === m.id) q2 = x.qty; });
+                    return '<span class="cmp-also" title="Also stored in ' + esc(ol.code) + '"><i class="fas fa-link" style="font-size:8px"></i> ' + esc(ol.code) + ' · ' + esc(q2) + '</span>';
+                }).join('');
+                var color = l.locked ? '#475569' : (m.status === 'out' ? '#dc2626' : (m.status === 'low' ? '#d97706' : '#16a34a'));
+                var dnr = (Number(m.qty) || 0) - (Number(m.rel != null ? m.rel : m.qty) || 0);
+                return '<tr class="' + (others.length ? 'cmp-row-common' : '') + '"><td><div class="med-name">' + esc(m.name) +
+                       (m.s2 ? '<span class="s2-chip">S2</span>' : '') + '</div>' +
+                       '<div class="med-sub">' + esc([m.strength, m.form].filter(Boolean).join(' · ')) + '</div>' + (also ? '<div>' + also + '</div>' : '') + '</td>' +
+                       '<td><span style="font-weight:700;color:' + color + '">' + esc(m.qty) + '</span>' + (dnr > 0 ? '<div class="med-sub">' + dnr + ' on hold</div>' : '') + '</td>' +
+                       '<td>' + cmpExpiry(m) + '</td></tr>';
+            }).join('') + '</tbody></table>';
+        }
+    }
+    return '<div class="cmp-pane">' + head + '<div class="cmp-pane-body">' + body + '</div></div>';
+}
+
+/* ── Stock In into the current location ─────────────────── */
+var SI = { loc: null, med: null, results: [], timer: null };
+
+function openStockIn(medId) {
+    if (!CAN_STOCK_IN) return;
+    var loc = locById(state.currentLoc);
+    if (!loc || loc.locked) { showToast('This location is locked.', 'error'); return; }
+    SI = { loc: loc, med: null, results: [], timer: null, batches: [], pickedPk: null };
+    var a = areaOfLoc(loc.id);
+    document.getElementById('siSub').textContent = 'Into ' + loc.code + (loc.name && loc.name !== loc.code ? ' — ' + loc.name : '') + (a ? ' · ' + a.name : '');
+    document.getElementById('siSoNote').style.display = loc.supply_office ? 'flex' : 'none';
+    ['siSearch','siBatch','siExpiry','siRef','siNotes','siPrice'].forEach(function(id) { document.getElementById(id).value = ''; });
+    document.getElementById('siQty').value = 1;
+    document.getElementById('siSupplier').value = '';
+    document.getElementById('siResults').classList.remove('open');
+    siClear();
+    if (medId) {
+        var r = null;
+        state.medsRows.forEach(function(x) { if (x.id === medId) r = x; });
+        if (r) siChoose({ pk: r.id, medicine_name: r.name, strength: r.strength, dosage_form: r.form, supplier_id: '', purchase_price: '' });
+    }
+    closeModal('medsModal');
+    openModal('stockInModal');
+    setTimeout(function() { document.getElementById(SI.med ? 'siBatch' : 'siSearch').focus(); }, 50);
+}
+
+function siBack() { closeModal('stockInModal'); if (SI.loc) openMeds(SI.loc.id); }
+
+function siSearch(q) {
+    clearTimeout(SI.timer);
+    var box = document.getElementById('siResults');
+    q = q.trim();
+    if (q.length < 2) { box.classList.remove('open'); return; }
+    SI.timer = setTimeout(function() {
+        fetch(URLS.med_search + '?q=' + encodeURIComponent(q), { credentials: 'same-origin' })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                SI.results = d.results || [];
+                box.innerHTML = SI.results.length ? SI.results.map(function(m, i) {
+                    return '<div class="si-item" onclick="siPick(' + i + ')">' + esc(m.medicine_name) + ' <span style="color:#94a3b8">' + esc(m.strength) + '</span>' +
+                           '<small>' + esc(m.label) + ' · ' + esc(m.stock_quantity) + ' in pharmacy stock</small></div>';
+                }).join('') : '<div class="find-empty">No medicines found for “' + esc(q) + '”.</div>';
+                box.classList.add('open');
+            })
+            .catch(function() { box.innerHTML = '<div class="find-empty">Search failed.</div>'; box.classList.add('open'); });
+    }, 300);
+}
+function siPick(i) { siChoose(SI.results[i]); }
+
+function siChoose(m) {
+    SI.med = m;
+    SI.batches = [];
+    SI.pickedPk = null;
+    document.getElementById('siResults').classList.remove('open');
+    document.getElementById('siSearch').parentNode.style.display = 'none';
+    document.getElementById('siChosenTxt').innerHTML = '<strong>' + esc(m.medicine_name) + '</strong> ' + esc(m.strength || '') + (m.dosage_form ? ' · ' + esc(m.dosage_form) : '');
+    document.getElementById('siChosen').classList.add('show');
+    if (m.supplier_id) document.getElementById('siSupplier').value = m.supplier_id;
+    if (m.purchase_price && m.purchase_price !== '0.00') document.getElementById('siPrice').value = m.purchase_price;
+    siLoadBatches(m.pk);
+}
+
+function siClear() {
+    SI.med = null; SI.batches = []; SI.pickedPk = null;
+    document.getElementById('siChosen').classList.remove('show');
+    document.getElementById('siBatches').classList.remove('show');
+    document.getElementById('siBatchItems').innerHTML = '';
+    document.getElementById('siSearch').parentNode.style.display = '';
+    document.getElementById('siSearch').value = '';
+    document.getElementById('siExpiry').readOnly = false;
+    document.getElementById('siHint').className = 'si-hint';
+}
+
+function siLoadBatches(medPk) {
+    fetch(URLS.med_info + '?pk=' + medPk, { credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (!d.found || !SI.med || SI.med.pk !== medPk) return;
+            // only batches whose effective location is THIS location
+            SI.batches = (d.batches || []).filter(function(b) {
+                return b.batch_number && String(b.location_id) === String(SI.loc.id);
+            });
+            siRenderBatches();
+            siHint();
+        })
+        .catch(function() {});
+}
+
+function siRenderBatches() {
+    var wrap = document.getElementById('siBatches'), box = document.getElementById('siBatchItems');
+    if (!SI.batches.length) { wrap.classList.remove('show'); box.innerHTML = ''; return; }
+    wrap.classList.add('show');
+    box.innerHTML = SI.batches.map(function(b, i) {
+        var tags = (b.is_expired ? ' · Expired' : (b.is_expiring ? ' · Expiring' : '')) + (b.do_not_release ? ' · On hold' : '');
+        return '<div class="si-batch' + (b.pk === SI.pickedPk ? ' selected' : '') + (b.do_not_release ? ' disabled' : '') + '"' +
+               (b.do_not_release ? '' : ' onclick="siPickBatch(' + i + ')"') + '>' +
+               '<div><div class="si-b-no">' + esc(b.batch_number) + '</div>' +
+               '<div class="si-b-sub">Exp: ' + esc(b.expiry_date || 'No expiry') + ' · ₱' + esc(b.purchase_price) + '/unit' + esc(tags) + '</div></div>' +
+               '<span class="si-b-qty">' + b.quantity + ' units</span></div>';
+    }).join('');
+}
+
+function siPickBatch(i) {
+    var b = SI.batches[i], exp = document.getElementById('siExpiry');
+    if (SI.pickedPk === b.pk) {                       // click again = back to a new batch
+        SI.pickedPk = null;
+        document.getElementById('siBatch').value = '';
+        exp.value = ''; exp.readOnly = false;
+        siRenderBatches(); siHint(); return;
+    }
+    SI.pickedPk = b.pk;
+    document.getElementById('siBatch').value = b.batch_number;
+    exp.value = b.expiry_date || '';
+    exp.readOnly = !!b.expiry_date;                   // same batch = same expiry
+    if (b.purchase_price && b.purchase_price !== '0.00') document.getElementById('siPrice').value = b.purchase_price;
+    if (b.supplier_id) document.getElementById('siSupplier').value = b.supplier_id;
+    siRenderBatches(); siHint();
+    var q = document.getElementById('siQty'); q.focus(); q.select();
+}
+
+function siBatchTyped() {
+    var bn = document.getElementById('siBatch').value.trim(), exp = document.getElementById('siExpiry');
+    var m = SI.batches.filter(function(b) { return b.batch_number === bn && !b.do_not_release; })[0];
+    SI.pickedPk = m ? m.pk : null;
+    if (m && m.expiry_date) { exp.value = m.expiry_date; exp.readOnly = true; }
+    else { exp.readOnly = false; }
+    siRenderBatches(); siHint();
+}
+
+function siHint() {
+    var h = document.getElementById('siHint'), bn = document.getElementById('siBatch').value.trim();
+    h.className = 'si-hint';
+    if (!SI.med || !bn) return;
+    var m = SI.batches.filter(function(b) { return b.batch_number === bn; })[0];
+    if (m && m.do_not_release) {
+        h.className = 'si-hint warn'; h.textContent = 'Batch ' + bn + ' is on Do Not Release. Lift the hold first.';
+    } else if (m) {
+        var ev = document.getElementById('siExpiry').value;
+        if (ev && m.expiry_date && ev !== m.expiry_date) {
+            h.className = 'si-hint warn'; h.textContent = 'Batch ' + bn + ' already has expiry ' + m.expiry_date + '. Use a different batch number for a different expiry.';
+        } else {
+            h.className = 'si-hint add'; h.textContent = 'Adding to existing batch ' + bn + ' (currently ' + m.quantity + ' units).';
+        }
+    } else {
+        h.className = 'si-hint new'; h.textContent = 'New batch ' + bn + ' will be created in ' + SI.loc.code + '.';
+    }
+}
+
+function siSubmit() {
+    if (!SI.med) { showToast('Select a medicine.', 'error'); return; }
+    var qty = parseInt(document.getElementById('siQty').value, 10) || 0;
+    var batch = document.getElementById('siBatch').value.trim();
+    var exp = document.getElementById('siExpiry').value;
+    if (qty <= 0) { showToast('Enter a quantity.', 'error'); return; }
+    if (!batch)   { showToast('Batch number is required.', 'error'); return; }
+    if (!exp)     { showToast('Expiry date is required.', 'error'); return; }
+    var btn = document.getElementById('siSubmit'); btn.disabled = true;
+    fetch(u(URLS.stock_in, SI.loc.id), {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            medicine_id: SI.med.pk, quantity: qty, batch_number: batch, expiry_date: exp,
+            purchase_price: document.getElementById('siPrice').value,
+            supplier_id: document.getElementById('siSupplier').value,
+            reference_no: document.getElementById('siRef').value,
+            notes: document.getElementById('siNotes').value
+        })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+        if (d.ok) {
+            var a = areaOfLoc(SI.loc.id);   // reload so counts/flags refresh; success shows as a toast
+            window.location.href = window.location.pathname + '?area=' + (a ? a.id : '') + '&open=' + SI.loc.id;
+        } else { btn.disabled = false; showToast(d.error || 'Stock In failed.', 'error'); }
+    })
+    .catch(function() { btn.disabled = false; showToast('Network error.', 'error'); });
+}
+document.addEventListener('click', function(e) {
+    var p = document.querySelector('.si-pick');
+    if (p && !p.contains(e.target)) document.getElementById('siResults').classList.remove('open');
 });
 
 /* ── Toast ─────────────────────────────────────────────── */

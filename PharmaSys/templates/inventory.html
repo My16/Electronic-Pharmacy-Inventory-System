@@ -197,6 +197,13 @@ select.form-control{cursor:pointer}
 .dnr-chip{display:inline-flex;align-items:center;gap:4px;background:rgba(239,68,68,.1);color:#dc2626;border:1px solid rgba(239,68,68,.25);border-radius:20px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer;font-family:'Poppins',sans-serif}
 .dnr-chip:hover{background:rgba(239,68,68,.18)}
 
+.hold-chip{display:inline-flex;align-items:center;gap:4px;border-radius:20px;padding:2px 8px;font-size:10px;font-weight:700;white-space:nowrap}
+.hold-chip.lock{background:rgba(245,158,11,.12);color:#b45309;border:1px solid rgba(245,158,11,.3)}
+.hold-chip.so{background:rgba(59,91,219,.1);color:#3b5bdb;border:1px solid rgba(59,91,219,.25)}
+.loc-chip.locked{background:rgba(245,158,11,.14);color:#b45309}
+.loc-chip.so{background:rgba(59,91,219,.12);color:#3b5bdb}
+
+
 </style>
 {% endblock %}
 
@@ -230,7 +237,7 @@ select.form-control{cursor:pointer}
         <div class="alert-list">
             {% for m in low_stock_items %}
             <div class="alert-item">
-                <div><div class="alert-item-name">{{ m.medicine_name }}</div><div class="alert-item-sub">{{ m.strength }} · Reorder at {{ m.reorder_level }}</div></div>
+                <div><div class="alert-item-name">{{ m.medicine_name }}</div><div class="alert-item-sub">{{ m.strength }} · Reorder at {{ m.reorder_level }}{% if m.so_qty %} · {{ m.so_qty }} in Supply Office{% endif %}{% if m.locked_qty %} · {{ m.locked_qty }} locked{% endif %}</div></div>
                 <span class="alert-item-qty qty-orange">{{ m.stock_quantity }} left</span>
             </div>
             {% empty %}<div class="alert-empty"><i class="fas fa-check-circle" style="color:#4ade80"></i>All stocks sufficient</div>{% endfor %}
@@ -255,7 +262,7 @@ select.form-control{cursor:pointer}
         <div class="alert-list">
             {% for m in out_of_stock_items %}
             <div class="alert-item">
-                <div><div class="alert-item-name">{{ m.medicine_name }}</div><div class="alert-item-sub">{{ m.strength }} · {{ m.get_dosage_form_display }}</div></div>
+                <div><div class="alert-item-name">{{ m.medicine_name }}</div><div class="alert-item-sub">{{ m.strength }} · {{ m.get_dosage_form_display }}{% if m.so_qty %} · {{ m.so_qty }} in Supply Office{% endif %}{% if m.locked_qty %} · {{ m.locked_qty }} locked{% endif %}</div></div>
                 <span class="alert-item-qty qty-gray">0 units</span>
             </div>
             {% empty %}<div class="alert-empty"><i class="fas fa-check-circle" style="color:#4ade80"></i>No out-of-stock medicines</div>{% endfor %}
@@ -313,6 +320,8 @@ select.form-control{cursor:pointer}
             <option value="expiring"     {% if status_filter == 'expiring'     %}selected{% endif %}>Expiring Soon</option>
             <option value="expired"      {% if status_filter == 'expired'      %}selected{% endif %}>Has Expired Batch</option>
             <option value="dnr" {% if status_filter == 'dnr' %}selected{% endif %}>Do Not Release</option>
+            <option value="locked" {% if status_filter == 'locked' %}selected{% endif %}>In Locked Location</option>
+            <option value="supply_office" {% if status_filter == 'supply_office' %}selected{% endif %}>In Supply Office</option>
         </select>
         {% if search or category_id or status_filter or dosage_filter %}
         <a href="{% url 'inventory' %}" style="font-size:12px;color:#dc2626;text-decoration:none;font-weight:600;"><i class="fas fa-xmark"></i> Clear</a>
@@ -325,7 +334,7 @@ select.form-control{cursor:pointer}
             <tr>
                 <th>#</th><th>Medicine</th><th>Category</th><th>Dosage</th>
                 <th>Supplier</th><th>Earliest Expiry (FEFO)</th><th>Sell Price</th>
-                <th>Total Stock</th><th>Status</th><th>Actions</th>
+                <th title="Available in the pharmacy. Excludes Do Not Release, locked locations and Supply Office.">Pharmacy Stock</th><th>Status</th><th>Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -349,8 +358,8 @@ select.form-control{cursor:pointer}
                     {% if m.loc_list %}
                     <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:3px;">
                         {% for it in m.loc_list %}
-                        <a class="loc-chip" style="margin-top:0" href="{% url 'storage_locations' %}?area={{ it.loc.area_id }}&focus={{ it.loc.pk }}" title="{{ it.loc.area.name }} — show on floor plan">
-                            <i class="fas fa-location-dot"></i> {{ it.loc.code }}{% if m.loc_list|length > 1 %} · {{ it.qty }}{% endif %}
+                        <a class="loc-chip{% if it.loc.is_supply_office %} so{% elif it.loc.is_locked %} locked{% endif %}" style="margin-top:0" href="{% url 'storage_locations' %}?area={{ it.loc.area_id }}&focus={{ it.loc.pk }}" title="{{ it.loc.area.name }}{% if it.loc.is_supply_office %} — Supply Office (not counted in pharmacy stock){% endif %}{% if it.loc.is_locked %} — LOCKED: {{ it.loc.get_lock_reason_display }}{% endif %} — show on floor plan">
+                            <i class="fas {% if it.loc.is_supply_office %}fa-building{% elif it.loc.is_locked %}fa-lock{% else %}fa-location-dot{% endif %}"></i> {{ it.loc.code }}{% if m.loc_list|length > 1 %} · {{ it.qty }}{% endif %}
                         </a>
                         {% endfor %}
                     </div>
@@ -384,6 +393,12 @@ select.form-control{cursor:pointer}
                                     title="{{ m.dnr_count }} batch(es) on Do Not Release. Click to view.">
                                 <i class="fas fa-hand"></i> {{ m.dnr_qty }} on hold
                             </button>
+                            {% endif %}
+                            {% if m.locked_qty %}
+                                <span class="hold-chip lock" title="Frozen in a locked location. Not available until unlocked."><i class="fas fa-lock"></i> {{ m.locked_qty }} locked</span>
+                            {% endif %}
+                            {% if m.so_qty %}
+                                <span class="hold-chip so" title="Stored in Supply Office. Not counted in pharmacy stock."><i class="fas fa-building"></i> {{ m.so_qty }} in Supply Office</span>
                             {% endif %}
                         {% with batch_count=m.batches.count %}
                         {% if batch_count > 0 %}
@@ -453,7 +468,7 @@ select.form-control{cursor:pointer}
                                 {% for b in m.batches.all %}
                                 <tr>
                                     <td>
-                                        {% if forloop.first and b.quantity > 0 and not b.do_not_release %}<span class="fefo-tag"><i class="fas fa-star"></i>FEFO 1st</span>{% endif %}
+                                        {% if forloop.first and b.quantity > 0 and not b.do_not_release and not b.is_locked and not b.is_supply_office %}<span class="fefo-tag"><i class="fas fa-star"></i>FEFO 1st</span>{% endif %}
                                         <span style="font-family:monospace;font-size:12px;">{{ b.batch_number|default:"No batch no." }}</span>
                                     </td>
                                     <td>
@@ -483,6 +498,8 @@ select.form-control{cursor:pointer}
                                         {% elif b.do_not_release %}
                                             <span class="dnr-badge"><i class="fas fa-hand"></i> Do Not Release</span>
                                             <div style="font-size:10.5px;color:#94a3b8;margin-top:2px;">{{ b.get_dnr_reason_display }}</div>
+                                        {% elif b.is_supply_office %}<span class="hold-chip so"><i class="fas fa-building"></i> Supply Office</span>
+                                        {% elif b.is_locked %}<span class="hold-chip lock"><i class="fas fa-lock"></i> Locked</span>
                                         {% elif b.is_expired %}<span class="expiry-badge expired">Expired</span>
                                         {% elif b.is_expiring_soon %}<span class="expiry-badge soon">Expiring</span>
                                         {% else %}<span class="expiry-badge ok">Active</span>{% endif %}
@@ -594,7 +611,7 @@ select.form-control{cursor:pointer}
                     <div class="form-group"><label class="form-label">Selling Price (₱)</label><input type="number" name="selling_price" class="form-control" step="0.01" min="0" value="0.00"></div>
                     <div class="form-group"><label class="form-label">Reorder Level</label><input type="number" name="reorder_level" class="form-control" min="0" value="10"></div>
                     <div class="form-group"><label class="form-label">Barcode</label><input type="text" name="barcode" id="add_barcode" class="form-control"></div>
-                    <div class="form-group"><label class="form-label">Storage Location</label><select name="location" class="form-control"><option value="">— Not assigned —</option>{% for a in storage_areas %}{% if a.choices %}<optgroup label="{{ a.name }}">{% for l in a.choices %}<option value="{{ l.pk }}">{{ l.code }}{% if l.name and l.name != l.code %} — {{ l.name }}{% endif %}</option>{% endfor %}</optgroup>{% endif %}{% endfor %}</select></div>
+                    <div class="form-group"><label class="form-label">Storage Location *</label><select name="location" id="add_location" class="form-control" required><option value="" disabled selected>— Select location —</option>{% for a in storage_areas %}{% if a.choices %}<optgroup label="{{ a.name }}">{% for l in a.choices %}<option value="{{ l.pk }}"{% if l.is_locked %} disabled{% endif %}>{{ l.code }}{% if l.name and l.name != l.code %} — {{ l.name }}{% endif %}{% if l.is_supply_office %} (Supply Office){% endif %}{% if l.is_locked %} (locked){% endif %}</option>{% endfor %}</optgroup>{% endif %}{% endfor %}</select></div>
                     <div class="form-group" style="grid-column:span 2;">
                         <label class="form-label">S2 Regulation</label>
                         <label style="display:flex;align-items:center;gap:10px;background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.18);border-radius:9px;padding:10px 14px;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='rgba(139,92,246,.1)'" onmouseout="this.style.background='rgba(139,92,246,.06)'">
@@ -609,7 +626,7 @@ select.form-control{cursor:pointer}
                 </div>
 
                 <div class="section-label">Initial Stock (Optional)</div>
-                <div class="info-note"><i class="fas fa-circle-info"></i>Enter initial stock on hand. Future deliveries are recorded via Stock Management → Stock In which creates new batches.</div>
+                <div class="info-note"><i class="fas fa-circle-info"></i>Initial stock goes into the Storage Location chosen above. If that is a Supply Office, it is held there and not counted in pharmacy stock. Future deliveries are recorded via Stock Management → Stock In.</div>
                 <div class="form-grid">
                     <div class="form-group"><label class="form-label">Initial Quantity</label><input type="number" name="stock_quantity" class="form-control" min="0" value="0"></div>
                     <div class="form-group"><label class="form-label">Purchase Price/unit (₱)</label><input type="number" name="purchase_price" class="form-control" step="0.01" min="0" value="0.00"></div>
@@ -665,7 +682,7 @@ select.form-control{cursor:pointer}
                     <div class="form-group"><label class="form-label">Selling Price (₱)</label><input type="number" name="selling_price" id="e_selling_price" class="form-control" step="0.01" min="0"></div>
                     <div class="form-group"><label class="form-label">Reorder Level</label><input type="number" name="reorder_level" id="e_reorder_level" class="form-control" min="0"></div>
                     <div class="form-group"><label class="form-label">Barcode</label><input type="text" name="barcode" id="e_barcode" class="form-control"></div>
-                    <div class="form-group"><label class="form-label">Storage Location</label><select name="location" id="e_location" class="form-control"><option value="">— Not assigned —</option>{% for a in storage_areas %}{% if a.choices %}<optgroup label="{{ a.name }}">{% for l in a.choices %}<option value="{{ l.pk }}">{{ l.code }}{% if l.name and l.name != l.code %} — {{ l.name }}{% endif %}</option>{% endfor %}</optgroup>{% endif %}{% endfor %}</select></div>
+                    <div class="form-group"><label class="form-label">Storage Location *</label><select name="location" id="e_location" class="form-control" required><option value="" disabled>— Select location —</option>{% for a in storage_areas %}{% if a.choices %}<optgroup label="{{ a.name }}">{% for l in a.choices %}<option value="{{ l.pk }}">{{ l.code }}{% if l.name and l.name != l.code %} — {{ l.name }}{% endif %}{% if l.is_supply_office %} (Supply Office){% endif %}{% if l.is_locked %} (locked){% endif %}</option>{% endfor %}</optgroup>{% endif %}{% endfor %}</select></div>
                     <div class="form-group" style="grid-column:span 2;">
                         <label class="form-label">S2 Regulation</label>
                         <label style="display:flex;align-items:center;gap:10px;background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.18);border-radius:9px;padding:10px 14px;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='rgba(139,92,246,.1)'" onmouseout="this.style.background='rgba(139,92,246,.06)'">
@@ -840,6 +857,7 @@ document.querySelectorAll('.modal-overlay').forEach(function(o) {
 // ── Add Modal ─────────────────────────────────────────────
 function openAddModal() {
     catClear('add');
+    document.getElementById('add_location').value = '';
     openModal('addModal');
 }
 

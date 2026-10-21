@@ -69,6 +69,9 @@ urlpatterns = [
     path('storage/locations/<int:pk>/medicines/', views.storage_location_medicines, name='storage_location_medicines'),
     path('storage/find/',                      views.storage_find_medicine,    name='storage_find'),
     path('storage/transfer/', views.storage_location_transfer, name='storage_location_transfer'),
+    path('storage/locations/<int:pk>/lock/', views.storage_location_lock, name='storage_location_lock'),
+    path('storage/location/<int:pk>/stock-in/', views.storage_location_stock_in, name='storage_location_stock_in'),
+
 
     # ── Returns ───────────────────────────────────────────────────────────────
     path('returns/',                              views.returns_view,            name='returns'),

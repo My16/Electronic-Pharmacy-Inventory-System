@@ -136,6 +136,7 @@ textarea.form-control{resize:vertical;min-height:70px}
 .move-badge.expired{background:rgba(245,158,11,.1);color:#d97706}.move-badge.damaged{background:rgba(107,114,128,.1);color:#6b7280}
 .move-badge.audit{background:rgba(20,184,166,.1);color:#0f766e}
 .move-badge.transfer{background:rgba(0,173,181,.1);color:#00ADB5}
+.move-badge.so_in{background:rgba(59,91,219,.12);color:#3b5bdb}
 .loc-tag{display:inline-flex;align-items:center;gap:3px;background:rgba(0,173,181,.1);color:#00ADB5;border-radius:20px;padding:0 7px;font-size:10px;font-weight:700;margin-left:4px}
 .qty-cell{font-weight:700;font-size:13px}
 .qty-cell.positive{color:#16a34a}.qty-cell.negative{color:#dc2626}.qty-cell.neutral{color:#2563eb}
@@ -259,14 +260,15 @@ textarea.form-control{resize:vertical;min-height:70px}
 
                     <div class="form-group">
                         <label class="form-label">Store In (Location)</label>
-                        <select name="location" id="in_location_sel" class="form-control" onchange="updateBatchHint()">
+                        <select name="location" id="in_location_sel" class="form-control" onchange="updateBatchHint();soNote()">
                             <option value="">— Medicine's main location —</option>
                             {% for a in storage_areas %}{% if a.choices %}
                             <optgroup label="{{ a.name }}">
-                                {% for l in a.choices %}<option value="{{ l.pk }}">{{ l.code }}{% if l.name and l.name != l.code %} — {{ l.name }}{% endif %}</option>{% endfor %}
+                                {% for l in a.choices %}<option value="{{ l.pk }}" data-so="{{ l.is_supply_office|yesno:'1,0' }}"{% if l.is_locked %} disabled{% endif %}>{{ l.code }}{% if l.name and l.name != l.code %} — {{ l.name }}{% endif %}{% if l.is_supply_office %} — Supply Office{% endif %}{% if l.is_locked %} (locked){% endif %}</option>{% endfor %}
                             </optgroup>
                             {% endif %}{% endfor %}
                         </select>
+                        <div class="info-note" id="in_so_note" style="display:none;background:rgba(59,91,219,.08);border-color:rgba(59,91,219,.25);color:#2b3f9e"><i class="fas fa-building" style="color:#3b5bdb"></i><span>Supply Office: this delivery will <strong>not</strong> be counted in pharmacy stock. Issue it to the pharmacy later from Storage Locations → Transfer.</span></div>
                     </div>
 
                     <div class="form-group"><label class="form-label">Reference / DR No.</label><input type="text" name="reference_no" class="form-control" placeholder="Delivery receipt or PO number"></div>
@@ -418,12 +420,15 @@ textarea.form-control{resize:vertical;min-height:70px}
                             {% elif mv.movement_type == 'damaged' %}<i class="fas fa-trash-can"></i> Damaged
                             {% elif mv.movement_type == 'audit' %}<i class="fas fa-clipboard-check"></i> Audit
                             {% elif mv.movement_type == 'transfer' %}<i class="fas fa-right-left"></i> Transfer
+                            {% elif mv.movement_type == 'so_in' %}<i class="fas fa-building"></i> Supply Office In
                             {% endif %}
                         </span>
                     </td>
                     <td>
                         {% if mv.movement_type == 'transfer' %}
                             <span class="qty-cell neutral" title="Total stock unchanged"><i class="fas fa-right-left" style="font-size:11px"></i></span>
+                        {% elif mv.movement_type == 'so_in' %}
+                            <span class="qty-cell" style="color:#3b5bdb" title="Held in Supply Office. Pharmacy stock unchanged.">+{{ mv.quantity }}</span>
                         {% else %}
                             <span class="qty-cell {% if mv.quantity > 0 %}positive{% elif mv.quantity < 0 %}negative{% else %}neutral{% endif %}">{% if mv.quantity > 0 %}+{% endif %}{{ mv.quantity }}</span>
                         {% endif %}
@@ -489,13 +494,17 @@ textarea.form-control{resize:vertical;min-height:70px}
             <div class="modal-form-group">
                 <label class="modal-label">Supplier</label>
                 <select id="editBatchSupplier" class="modal-input">
+                    <option value="">— None —</option>
+                    {% for s in suppliers %}<option value="{{ s.pk }}">{{ s.name }}</option>{% endfor %}
+                </select>
+            </div>
             <div class="modal-form-group">
                 <label class="modal-label">Storage Location</label>
                 <select id="editBatchLocation" class="modal-input">
                     <option value="">— Medicine's main location —</option>
                     {% for a in storage_areas %}{% if a.choices %}
                     <optgroup label="{{ a.name }}">
-                        {% for l in a.choices %}<option value="{{ l.pk }}">{{ l.code }}{% if l.name and l.name != l.code %} — {{ l.name }}{% endif %}</option>{% endfor %}
+                        {% for l in a.choices %}<option value="{{ l.pk }}" data-so="{{ l.is_supply_office|yesno:'1,0' }}"{% if l.is_locked %} disabled{% endif %}>{{ l.code }}{% if l.name and l.name != l.code %} — {{ l.name }}{% endif %}{% if l.is_supply_office %} — Supply Office{% endif %}{% if l.is_locked %} (locked){% endif %}</option>{% endfor %}
                     </optgroup>
                     {% endif %}{% endfor %}
                 </select>
@@ -607,6 +616,16 @@ function selectMedicineFromEl(tab, el) {
     selectMedicine(tab, JSON.parse(decodeURIComponent(el.dataset.json)));
 }
 
+function updateHeld(tab, d) {
+    const card = document.getElementById(`${tab}_info_card`); if (!card) return;
+    let n = card.querySelector('.held-note');
+    if (!n) { n = document.createElement('div'); n.className = 'held-note'; n.style.cssText = 'font-size:11.5px;margin-top:8px;color:#475569'; card.appendChild(n); }
+    const parts = [];
+    if (d.supply_office_quantity) parts.push(d.supply_office_quantity + ' in Supply Office');
+    if (d.locked_quantity) parts.push(d.locked_quantity + ' locked');
+    n.textContent = parts.length ? 'Not counted above: ' + parts.join(' · ') : '';
+}
+
 function selectMedicine(tab, med) {
     if (tab === 'in') clearBatchPick(true);
     document.getElementById(`${tab}_medicine_id`).value = med.pk;
@@ -621,6 +640,7 @@ function selectMedicine(tab, med) {
             if (data.found) {
                 currentStockData[tab] = { ...med, ...data };
                 renderBatchList(tab, data.batches || []);
+                updateHeld(tab, data);
                 if (tab === 'in') updateBatchHint();
                 if (tab === 'adj') {
                     document.getElementById('adj_new_qty').value = data.stock_quantity;
@@ -636,6 +656,7 @@ function selectMedicine(tab, med) {
         if (ppEl && med.purchase_price && med.purchase_price !== '0.00') ppEl.value = med.purchase_price;
         const locEl = document.getElementById('in_location_sel');
         if (locEl) locEl.value = med.location_id || '';
+        soNote();
     }
 }
 
@@ -675,20 +696,24 @@ function renderBatchList(tab, batches) {
     if (!batches.length) { listWrap.style.display = 'none'; return; }
     listWrap.style.display = 'block';
 
+    const firstFefo = batches.findIndex(b => !b.is_expired && !b.do_not_release && !b.locked && !b.supply_office);
+
     itemsWrap.innerHTML = batches.map((b, idx) => {
         const isExpired  = b.is_expired;
         const isExpiring = b.is_expiring;
-        let chip = (idx === 0 && !isExpired && !b.do_not_release)
+        let chip = (idx === firstFefo)
             ? '<span class="fefo-chip"><i class="fas fa-star"></i>FEFO 1st</span>' : '';
         if (isExpired)  chip += '<span class="fefo-chip expired-chip">Expired</span>';
         if (isExpiring) chip += '<span class="fefo-chip expiring-chip">Expiring</span>';
         if (b.do_not_release) chip += '<span class="fefo-chip expired-chip">On hold</span>';
+        if (b.supply_office) chip += '<span class="fefo-chip" style="background:rgba(59,91,219,.12);color:#3b5bdb">Supply Office</span>';
+        else if (b.locked)   chip += '<span class="fefo-chip" style="background:#e2e8f0;color:#475569">Locked</span>';
         const expiryTxt = b.expiry_date || 'No expiry';
 
         let clickHandler = '';
-        if (tab === 'adj') {
+        if (tab === 'adj' && !b.locked && !b.supply_office) {
             clickHandler = `onclick="selectBatch('${tab}',this)"`;
-        } else if (tab === 'in' && b.batch_number && !b.do_not_release) {
+        } else if (tab === 'in' && b.batch_number && !b.do_not_release && !b.locked) {
             clickHandler = `onclick="pickBatchForStockIn(this)" data-pickable="1" title="Click to add stock to this batch"`;
         }
 
@@ -758,6 +783,7 @@ function pickBatchForStockIn(el) {
     if (b.purchase_price && b.purchase_price !== '0.00') $id('in_purchase_price').value = b.purchase_price;
     if (b.supplier_id) $id('in_supplier_sel').value = b.supplier_id;
     $id('in_location_sel').value = b.location_id || '';
+    soNote();
 
     updateBatchHint();
     const q = document.querySelector('#form-in input[name="quantity"]');
@@ -816,6 +842,11 @@ function updateBatchHint() {
 }
 
 
+function soNote() {
+    const s = $id('in_location_sel'), o = s.options[s.selectedIndex];
+    $id('in_so_note').style.display = (o && o.dataset.so === '1') ? 'flex' : 'none';
+}
+
 
 
 function updateFefoPreview() { /* FEFO done server-side */ }
@@ -830,6 +861,7 @@ function openBatchEdit(pk, safeJson) {
     document.getElementById('editBatchNumber').value        = b.batch_number  || '';
     document.getElementById('editBatchExpiry').value        = b.expiry_date   || '';
     document.getElementById('editBatchPrice').value         = b.purchase_price || '';
+    document.getElementById('editBatchSupplier').value      = b.supplier_id  || '';
     document.getElementById('editBatchLocation').value      = b.location_id   || '';
     document.getElementById('batchEditModal').classList.add('open');
 }
