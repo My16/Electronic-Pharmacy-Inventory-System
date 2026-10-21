@@ -187,6 +187,16 @@ select.form-control{cursor:pointer}
 .empty-state p{font-size:13.5px;color:#90a4ae}
 .toast{position:fixed;bottom:26px;right:26px;background:#1a2433;color:#fff;padding:11px 16px;border-radius:10px;font-size:12.5px;font-weight:500;display:flex;align-items:center;gap:9px;box-shadow:0 8px 24px rgba(0,0,0,.2);z-index:9999;transform:translateY(70px);opacity:0;transition:transform .3s cubic-bezier(.34,1.56,.64,1),opacity .3s;pointer-events:none;max-width:360px}
 .toast.show{transform:translateY(0);opacity:1}.toast.success i{color:#4ade80}.toast.error i{color:#f87171}
+
+
+.dnr-badge{display:inline-flex;align-items:center;gap:4px;background:rgba(239,68,68,.12);color:#dc2626;border-radius:20px;padding:2px 8px;font-size:10px;font-weight:700}
+.btn-dnr{border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:6px;padding:3px 9px;font-size:11px;font-weight:600;cursor:pointer;font-family:'Poppins',sans-serif}
+.btn-dnr.lift{border-color:#bbf7d0;background:#f0fdf4;color:#16a34a}
+
+.med-row.has-dnr td:first-child{box-shadow:inset 3px 0 0 #dc2626}
+.dnr-chip{display:inline-flex;align-items:center;gap:4px;background:rgba(239,68,68,.1);color:#dc2626;border:1px solid rgba(239,68,68,.25);border-radius:20px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer;font-family:'Poppins',sans-serif}
+.dnr-chip:hover{background:rgba(239,68,68,.18)}
+
 </style>
 {% endblock %}
 
@@ -302,6 +312,7 @@ select.form-control{cursor:pointer}
             <option value="out_of_stock" {% if status_filter == 'out_of_stock' %}selected{% endif %}>Out of Stock</option>
             <option value="expiring"     {% if status_filter == 'expiring'     %}selected{% endif %}>Expiring Soon</option>
             <option value="expired"      {% if status_filter == 'expired'      %}selected{% endif %}>Has Expired Batch</option>
+            <option value="dnr" {% if status_filter == 'dnr' %}selected{% endif %}>Do Not Release</option>
         </select>
         {% if search or category_id or status_filter or dosage_filter %}
         <a href="{% url 'inventory' %}" style="font-size:12px;color:#dc2626;text-decoration:none;font-weight:600;"><i class="fas fa-xmark"></i> Clear</a>
@@ -320,7 +331,7 @@ select.form-control{cursor:pointer}
         <tbody>
             {% for m in medicines %}
             {# ─── Medicine row ─── #}
-            <tr class="med-row {% if highlight_pk == m.pk|stringformat:'s' %}highlight-row{% endif %}" id="row-{{ m.pk }}">
+            <tr class="med-row {% if m.dnr_qty %}has-dnr{% endif %} {% if highlight_pk == m.pk|stringformat:'s' %}highlight-row{% endif %}" id="row-{{ m.pk }}">
                 <td style="color:#b0bec5;font-size:11.5px;">{{ page_obj.start_index|add:forloop.counter0 }}</td>
                 <td>
                     <div class="med-name">
@@ -368,6 +379,12 @@ select.form-control{cursor:pointer}
                 <td>
                     <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">
                         <span id="qty-{{ m.pk }}" style="font-size:14px;font-weight:700;color:{% if m.is_out_of_stock %}#dc2626{% elif m.is_low_stock %}#d97706{% else %}#16a34a{% endif %};">{{ m.stock_quantity }}</span>
+                        {% if m.dnr_qty %}
+                            <button type="button" class="dnr-chip" onclick="toggleBatches({{ m.pk }})"
+                                    title="{{ m.dnr_count }} batch(es) on Do Not Release. Click to view.">
+                                <i class="fas fa-hand"></i> {{ m.dnr_qty }} on hold
+                            </button>
+                            {% endif %}
                         {% with batch_count=m.batches.count %}
                         {% if batch_count > 0 %}
                         <button type="button" class="btn-batch-toggle" id="btntoggle-{{ m.pk }}" onclick="toggleBatches({{ m.pk }})">
@@ -429,14 +446,14 @@ select.form-control{cursor:pointer}
                             <thead>
                                 <tr>
                                     <th>Batch No.</th><th>Expiry Date</th><th>Qty</th><th>Location</th>
-                                    <th>Purchase Price</th><th>Supplier</th><th>Received</th><th>Status</th>
+                                    <th>Purchase Price</th><th>Supplier</th><th>Received</th><th>Status</th><th>Action</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for b in m.batches.all %}
                                 <tr>
                                     <td>
-                                        {% if forloop.first and b.quantity > 0 %}<span class="fefo-tag"><i class="fas fa-star"></i>FEFO 1st</span>{% endif %}
+                                        {% if forloop.first and b.quantity > 0 and not b.do_not_release %}<span class="fefo-tag"><i class="fas fa-star"></i>FEFO 1st</span>{% endif %}
                                         <span style="font-family:monospace;font-size:12px;">{{ b.batch_number|default:"No batch no." }}</span>
                                     </td>
                                     <td>
@@ -456,14 +473,45 @@ select.form-control{cursor:pointer}
                                     </td>
                                     <td style="color:#94a3b8;font-size:11.5px;">{{ b.received_at|date:"M d, Y" }}</td>
                                     <td>
-                                        {% if b.quantity == 0 %}<span style="color:#b0bec5;font-size:11px;">Empty</span>
+                                        {% if b.quantity == 0 %}
+                                            {% if b.dnr_reason %}
+                                                <span class="dnr-badge" style="background:rgba(148,163,184,.15);color:#64748b;"><i class="fas fa-box-archive"></i> Removed</span>
+                                                <div style="font-size:10.5px;color:#94a3b8;margin-top:2px;">{{ b.get_dnr_reason_display }}</div>
+                                            {% else %}
+                                                <span style="color:#b0bec5;font-size:11px;">Empty</span>
+                                            {% endif %}
+                                        {% elif b.do_not_release %}
+                                            <span class="dnr-badge"><i class="fas fa-hand"></i> Do Not Release</span>
+                                            <div style="font-size:10.5px;color:#94a3b8;margin-top:2px;">{{ b.get_dnr_reason_display }}</div>
                                         {% elif b.is_expired %}<span class="expiry-badge expired">Expired</span>
                                         {% elif b.is_expiring_soon %}<span class="expiry-badge soon">Expiring</span>
                                         {% else %}<span class="expiry-badge ok">Active</span>{% endif %}
                                     </td>
+                                    <td>
+                                        {% if can_manage %}
+                                            {% if b.do_not_release %}
+                                            <div style="display:flex;gap:5px;flex-wrap:wrap;">
+                                                <button type="button" class="btn-dnr lift" data-pk="{{ b.pk }}"
+                                                    data-label="{{ m.medicine_name }} — Batch {{ b.batch_number|default:'—' }}"
+                                                    data-qty="{{ b.quantity }}"
+                                                    data-reason="{{ b.get_dnr_reason_display }}"
+                                                    onclick="openLiftModal(this)">Make Available</button>
+                                                <button type="button" class="btn-dnr" data-pk="{{ b.pk }}"
+                                                        data-label="{{ m.medicine_name }} — Batch {{ b.batch_number|default:'—' }}"
+                                                        data-qty="{{ b.quantity }}"
+                                                        data-reason="{{ b.get_dnr_reason_display }}"
+                                                        onclick="openRemoveModal(this)">Remove from Inventory</button>
+                                            </div>
+                                            {% elif b.quantity > 0 %}
+                                            <button type="button" class="btn-dnr" data-pk="{{ b.pk }}"
+                                                    data-label="{{ m.medicine_name }} — Batch {{ b.batch_number|default:'—' }} ({{ b.quantity }} units)"
+                                                    onclick="openDnrModal(this)">Do Not Release</button>
+                                            {% endif %}
+                                        {% endif %}
+                                    </td>
                                 </tr>
                                 {% empty %}
-                                <tr><td colspan="8" style="text-align:center;color:#b0bec5;padding:12px;">No batches on record.</td></tr>
+                                <tr><td colspan="9" style="text-align:center;color:#b0bec5;padding:12px;">No batches on record.</td></tr>
                                 {% endfor %}
                             </tbody>
                         </table>
@@ -657,6 +705,95 @@ select.form-control{cursor:pointer}
     </div>
 </div>
 
+<!-- ── DO NOT RELEASE MODAL ───────────────────────────── -->
+<div class="modal-overlay" id="dnrModal">
+    <div class="modal modal-sm">
+        <div class="modal-header">
+            <div class="modal-title"><i class="fas fa-hand"></i>Do Not Release</div>
+            <button class="modal-close" onclick="closeModal('dnrModal')"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="dnr_batch_pk">
+            <p id="dnr_label" style="font-size:12.5px;font-weight:600;margin-bottom:12px;"></p>
+            <div class="form-group" style="margin-bottom:12px;">
+                <label class="form-label">Reason *</label>
+                <select id="dnr_reason" class="form-control">
+                    <option value="">— Select reason —</option>
+                    <option value="rts_replacement">Return to Supplier - Replacement</option>
+                    <option value="rts_no_replacement">Return to Supplier - No Replacement (Above 18 Months Delivery)</option>
+                    <option value="rts_credit_memo">Return to Supplier - Credit Memo</option>
+                    <option value="rts_recall">Return to Supplier - Product Recall</option>
+                    <option value="donation">For Donation</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Notes (optional)</label>
+                <input type="text" id="dnr_notes" class="form-control" placeholder="e.g. RTS slip no., donee">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="closeModal('dnrModal')">Cancel</button>
+            <button type="button" class="btn-danger" onclick="submitDnr()">Confirm</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── REMOVE FROM INVENTORY MODAL ───────────────────── -->
+<div class="modal-overlay" id="removeModal">
+    <div class="modal modal-sm">
+        <div class="delete-body" style="padding-bottom:12px;">
+            <div class="delete-icon"><i class="fas fa-box-archive"></i></div>
+            <div class="delete-title">Remove from Inventory</div>
+            <p class="delete-msg">
+                Permanently remove <strong id="rm_label"></strong>?<br>
+                <strong id="rm_qty"></strong> unit(s) will be taken out of inventory.<br>
+                Reason on hold: <strong id="rm_reason"></strong>
+            </p>
+            <div class="info-note" style="text-align:left;margin:12px 0 0;">
+                <i class="fas fa-triangle-exclamation"></i>
+                This cannot be undone. The batch stays in the log as a removal record.
+            </div>
+        </div>
+        <div style="padding:0 22px 16px;">
+            <input type="hidden" id="rm_batch_pk">
+            <div class="form-group">
+                <label class="form-label">Notes (optional)</label>
+                <input type="text" id="rm_notes" class="form-control" placeholder="e.g. RTS slip no., recall ref, donee">
+            </div>
+        </div>
+        <div class="modal-footer" style="justify-content:center;gap:12px;">
+            <button type="button" class="btn-cancel" onclick="closeModal('removeModal')">Cancel</button>
+            <button type="button" class="btn-danger" onclick="submitRemove()"><i class="fas fa-box-archive" style="margin-right:5px"></i>Yes, Remove</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── MAKE AVAILABLE MODAL ───────────────────────────── -->
+<div class="modal-overlay" id="liftModal">
+    <div class="modal modal-sm">
+        <div class="delete-body" style="padding-bottom:12px;">
+            <div class="delete-icon" style="background:rgba(34,197,94,.12);color:#16a34a;"><i class="fas fa-circle-check"></i></div>
+            <div class="delete-title">Make Available</div>
+            <p class="delete-msg">
+                Release <strong id="lf_label"></strong> back to inventory?<br>
+                <strong id="lf_qty"></strong> unit(s) will become available for dispensing again.<br>
+                Was on hold for: <strong id="lf_reason"></strong>
+            </p>
+        </div>
+        <div style="padding:0 22px 16px;">
+            <input type="hidden" id="lf_batch_pk">
+            <div class="form-group">
+                <label class="form-label">Notes (optional)</label>
+                <input type="text" id="lf_notes" class="form-control" placeholder="e.g. replacement cleared, recall lifted">
+            </div>
+        </div>
+        <div class="modal-footer" style="justify-content:center;gap:12px;">
+            <button type="button" class="btn-cancel" onclick="closeModal('liftModal')">Cancel</button>
+            <button type="button" class="btn-submit" style="background:#16a34a;box-shadow:0 2px 8px rgba(22,163,74,.25);" onclick="submitLift()"><i class="fas fa-circle-check" style="margin-right:5px"></i>Yes, Make Available</button>
+        </div>
+    </div>
+</div>
+
 <div class="toast" id="toast"><i class="fas fa-circle-check"></i><span id="toastMsg"></span></div>
 {% endblock %}
 
@@ -670,6 +807,7 @@ const URLS = {
     inventory_barcode: "{% url 'inventory_barcode' %}",
     category_search:   "{% url 'category_search_ajax' %}",
     category_create:   "{% url 'category_create_ajax' %}",
+    batch_dnr:         "{% url 'batch_dnr' pk=0 %}".replace('/0/', '/__PK__/'),
 };
 const CSRF = '{{ csrf_token }}';
 
@@ -730,6 +868,61 @@ function openEditModal(btn) {
     catSetValue('edit', catPk, catName);
 
     openModal('editModal');
+}
+
+
+// ── Do Not Release ────────────────────────────────────────
+function openDnrModal(btn) {
+    document.getElementById('dnr_batch_pk').value = btn.getAttribute('data-pk');
+    document.getElementById('dnr_label').textContent = btn.getAttribute('data-label');
+    document.getElementById('dnr_reason').value = '';
+    document.getElementById('dnr_notes').value = '';
+    openModal('dnrModal');
+}
+function _dnrPost(pk, payload) {
+    return fetch(URLS.batch_dnr.replace('__PK__', pk), {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    }).then(function(r) { return r.json(); });
+}
+function submitDnr() {
+    var pk = document.getElementById('dnr_batch_pk').value;
+    var reason = document.getElementById('dnr_reason').value;
+    if (!reason) { showToast('Please select a reason.', 'error'); return; }
+    _dnrPost(pk, { action: 'hold', reason: reason, notes: document.getElementById('dnr_notes').value })
+        .then(function(d) { d.success ? window.location.reload() : showToast(d.error || 'Failed.', 'error'); })
+        .catch(function() { showToast('Network error.', 'error'); });
+}
+function openLiftModal(btn) {
+    document.getElementById('lf_batch_pk').value = btn.getAttribute('data-pk');
+    document.getElementById('lf_label').textContent  = btn.getAttribute('data-label');
+    document.getElementById('lf_qty').textContent    = btn.getAttribute('data-qty');
+    document.getElementById('lf_reason').textContent = btn.getAttribute('data-reason');
+    document.getElementById('lf_notes').value = '';
+    openModal('liftModal');
+}
+function submitLift() {
+    var pk = document.getElementById('lf_batch_pk').value;
+    _dnrPost(pk, { action: 'unhold', notes: document.getElementById('lf_notes').value })
+        .then(function(d) { d.success ? window.location.reload() : showToast(d.error || 'Failed.', 'error'); })
+        .catch(function() { showToast('Network error.', 'error'); });
+}
+
+
+function openRemoveModal(btn) {
+    document.getElementById('rm_batch_pk').value = btn.getAttribute('data-pk');
+    document.getElementById('rm_label').textContent  = btn.getAttribute('data-label');
+    document.getElementById('rm_qty').textContent    = btn.getAttribute('data-qty');
+    document.getElementById('rm_reason').textContent = btn.getAttribute('data-reason');
+    document.getElementById('rm_notes').value = '';
+    openModal('removeModal');
+}
+function submitRemove() {
+    var pk = document.getElementById('rm_batch_pk').value;
+    _dnrPost(pk, { action: 'remove', notes: document.getElementById('rm_notes').value })
+        .then(function(d) { d.success ? window.location.reload() : showToast(d.error || 'Failed.', 'error'); })
+        .catch(function() { showToast('Network error.', 'error'); });
 }
 
 // ── Delete Modal ──────────────────────────────────────────

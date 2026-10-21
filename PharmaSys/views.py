@@ -109,7 +109,7 @@ def _deduct_fefo(medicine, qty_needed, performed_by,
 
     # Batches ordered: soonest expiry first, then no-expiry batches, then oldest received
     batches = list(
-        medicine.batches.filter(quantity__gt=0)
+        medicine.batches.filter(quantity__gt=0, do_not_release=False)
         .order_by(
             F('expiry_date').asc(nulls_last=True),
             'received_at'
@@ -148,14 +148,20 @@ def _deduct_fefo(medicine, qty_needed, performed_by,
     return True
 
 
+def _format_requisition(seq, ward, year):
+    return f'{seq:04d}/{ward.requisition_label}/{year}'
+
+
 def _next_requisition(ward, year, half):
-    """Next In Patient requisition for this ward + year + half → (seq, '0001/WARD/2026')."""
+    """Continues from the most recent In Patient requisition for this ward/period,
+    so an admin override moves the counter."""
     last = (Dispensing.objects
-            .filter(patient_type='in', ward=ward,
-                    requisition_year=year, requisition_half=half)
-            .aggregate(m=Max('requisition_seq'))['m'] or 0)
+            .filter(patient_type='in', ward=ward, requisition_year=year,
+                    requisition_half=half, requisition_seq__isnull=False)
+            .order_by('-id')
+            .values_list('requisition_seq', flat=True).first() or 0)
     seq = last + 1
-    return seq, f'{seq:04d}/{ward.requisition_label}/{year}'
+    return seq, _format_requisition(seq, ward, year)
 
 
 def _parse_date_range(request, default_days=30):
@@ -386,7 +392,7 @@ def inventory_view(request):
         medicines_qs = medicines_qs.filter(dosage_form=dosage_filter)
 
     # Status filters require Python-level evaluation because stock_quantity is a property
-    if status_filter in ('low_stock', 'out_of_stock', 'expiring', 'expired'):
+    if status_filter in ('low_stock', 'out_of_stock', 'expiring', 'expired', 'dnr'):
         all_meds = list(medicines_qs)
         if status_filter == 'low_stock':
             medicines_qs = [m for m in all_meds if m.is_low_stock]
@@ -396,6 +402,9 @@ def inventory_view(request):
             medicines_qs = [m for m in all_meds if m.is_expiring_soon and not m.is_expired]
         elif status_filter == 'expired':
             medicines_qs = [m for m in all_meds if m.is_expired]
+        elif status_filter == 'dnr':
+            medicines_qs = [m for m in all_meds
+                            if any(b.do_not_release and b.quantity > 0 for b in m.batches.all())]
 
     if highlight_pk:
         try:
@@ -414,6 +423,10 @@ def inventory_view(request):
 
     rows = list(page_obj.object_list)
     _attach_locations(rows)
+    for m in rows:
+        held = [b for b in m.batches.all() if b.do_not_release and b.quantity > 0]   # already prefetched
+        m.dnr_qty   = sum(b.quantity for b in held)
+        m.dnr_count = len(held)
 
     # Alert panel items
     all_active = list(Medicine.objects.filter(is_active=True).prefetch_related('batches'))
@@ -424,6 +437,7 @@ def inventory_view(request):
     expiring_batches = MedicineStock.objects.filter(
         medicine__is_active=True,
         quantity__gt=0,
+        do_not_release=False,
         expiry_date__lte=expiry_threshold,
         expiry_date__gte=today,
     ).select_related('medicine').order_by('expiry_date')[:10]
@@ -450,9 +464,10 @@ def inventory_view(request):
         'low_stock_count':     len([m for m in all_active if m.is_low_stock]),
         'out_of_stock_count':  len([m for m in all_active if m.is_out_of_stock]),
         'expiring_soon_count': MedicineStock.objects.filter(
-                                   medicine__is_active=True, quantity__gt=0,
-                                   expiry_date__lte=expiry_threshold,
-                                   expiry_date__gte=today).values('medicine').distinct().count(),
+            medicine__is_active=True, quantity__gt=0,
+            do_not_release=False,
+            expiry_date__lte=expiry_threshold,
+            expiry_date__gte=today).values('medicine').distinct().count(),
         'today': today,
         'can_manage': can(request.user, 'inventory', 'edit'),
         'can_admin':  is_admin(request.user),
@@ -651,7 +666,7 @@ def medicine_search_ajax(request):
     results = []
     for m in qs:
         # Earliest non-expired active batch for display
-        fefo_batch = m.batches.filter(quantity__gt=0).order_by(
+        fefo_batch = m.batches.filter(quantity__gt=0, do_not_release=False).order_by(
             F('expiry_date').asc(nulls_last=True), 'received_at'
         ).first()
         results.append({
@@ -660,6 +675,8 @@ def medicine_search_ajax(request):
             'label':          f"{m.medicine_name} {m.strength} ({m.get_dosage_form_display()})",
             'medicine_name':  m.medicine_name,
             'generic_name':   m.generic_name,
+            'brand_name':     m.brand_name,
+            'manufacturer':   m.manufacturer,
             'strength':       m.strength,
             'dosage_form':    m.get_dosage_form_display(),
             'stock_quantity': m.stock_quantity,
@@ -673,6 +690,7 @@ def medicine_search_ajax(request):
             'purchase_price': str(fefo_batch.purchase_price) if fefo_batch else '0.00',
             'selling_price':  str(m.selling_price),
             'barcode':        m.barcode or '',
+            'location_id':    m.location_id or '',
         })
     return JsonResponse({'results': results})
 
@@ -700,7 +718,7 @@ def stock_management_view(request):
         per_page = 15
 
     movements_qs = StockMovement.objects.select_related(
-        'medicine', 'performed_by', 'supplier', 'batch').all()
+        'medicine', 'performed_by', 'supplier', 'batch', 'batch__location').all()
 
     if date_from:
         movements_qs = movements_qs.filter(created_at__date__gte=date_from)
@@ -748,6 +766,7 @@ def stock_management_view(request):
         'total_adjustments_today': total_adj_today,
         'total_movements_today':   total_mv_today,
         'today': today,
+        'storage_areas': get_storage_areas(),
     }
     return render(request, 'stock_management.html', context)
 
@@ -755,15 +774,16 @@ def stock_management_view(request):
 @require('stock_management', 'edit')
 def stock_in_view(request):
     """
-    Records a new delivery. Always creates a new MedicineStock batch.
-    If a batch with the same batch_number already exists for this medicine,
-    it adds to that existing batch instead of creating a duplicate.
+    Records a delivery into a chosen storage location.
+    If a batch with the same batch_number already exists for this medicine
+    AT THE SAME LOCATION, stock is added to it; otherwise a new batch is created.
     """
     if request.method == 'POST':
         try:
             medicine_id    = request.POST.get('medicine')
             qty            = int(request.POST.get('quantity', 0))
             supplier_id    = request.POST.get('supplier') or None
+            location_id    = _to_int(request.POST.get('location'))
             batch_number   = request.POST.get('batch_number', '').strip()
             expiry_date    = request.POST.get('expiry_date') or None
             purchase_price = request.POST.get('purchase_price') or 0
@@ -777,27 +797,52 @@ def stock_in_view(request):
                 messages.error(request, 'Quantity must be greater than zero.')
                 return redirect('stock_management')
 
-            medicine = get_object_or_404(Medicine, pk=medicine_id, is_active=True)
+            medicine  = get_object_or_404(Medicine, pk=medicine_id, is_active=True)
             old_total = medicine.stock_quantity
 
-            # Try to match existing batch by batch_number (if provided)
+            # ── Location (must be a real storage shelf, not a landmark) ──
+            location = None
+            if location_id:
+                location = StorageLocation.objects.filter(
+                    pk=location_id, kind=StorageLocation.KIND_SHELF).first()
+                if not location:
+                    messages.error(request, 'Selected storage location is invalid.')
+                    return redirect('stock_management')
+            eff_loc = location or medicine.location      # blank = medicine's main location
+
+            # ── Look for an existing batch: same number + same effective location ──
             batch = None
             if batch_number:
-                batch = (medicine.batches.filter(batch_number=batch_number)
-                         .filter(Q(location__isnull=True) | Q(location=medicine.location))
-                         .first())
+                same = medicine.batches.filter(batch_number=batch_number)
+                if eff_loc:
+                    same = same.filter(Q(location=eff_loc) |
+                                       Q(location__isnull=True, medicine__location=eff_loc))
+                else:
+                    same = same.filter(location__isnull=True)
+                batch = same.first()
 
             if batch:
-                # Update existing batch quantity
-                batch.quantity       += qty
-                batch.purchase_price  = purchase_price  # update price to latest
-                if expiry_date:
+                if batch.do_not_release:
+                    messages.error(request,
+                        f'Batch "{batch.batch_number}" is on Do Not Release. '
+                        'Lift the hold first before adding stock to it.')
+                    return redirect('stock_management')
+                if expiry_date and batch.expiry_date and str(batch.expiry_date) != expiry_date:
+                    messages.error(request,
+                        f'Batch "{batch.batch_number}" already has expiry {batch.expiry_date}. '
+                        'Use a different batch number if this delivery has a different expiry, '
+                        'or fix the expiry via the batch edit button.')
+                    return redirect('stock_management')
+
+                batch.quantity += qty
+                if float(purchase_price) > 0:            # don't wipe the price when left blank
+                    batch.purchase_price = purchase_price
+                if expiry_date and not batch.expiry_date:
                     batch.expiry_date = expiry_date
                 if supplier_id:
                     batch.supplier_id = supplier_id
                 batch.save()
             else:
-                # Create new batch
                 batch = MedicineStock.objects.create(
                     medicine       = medicine,
                     batch_number   = batch_number,
@@ -805,6 +850,7 @@ def stock_in_view(request):
                     quantity       = qty,
                     purchase_price = purchase_price,
                     supplier_id    = supplier_id,
+                    location       = location,
                     created_by     = request.user,
                 )
 
@@ -818,14 +864,15 @@ def stock_in_view(request):
                 supplier_id=supplier_id,
                 batch_number=batch.batch_number,
                 expiry_date=batch.expiry_date,
-                purchase_price=purchase_price,
+                purchase_price=batch.purchase_price,
                 reference_no=reference_no,
                 notes=notes,
                 performed_by=request.user,
             )
+            loc_txt = f' → {eff_loc.code}' if eff_loc else ''
             messages.success(request,
                 f'Stock In: +{qty} units of "{medicine.medicine_name}" '
-                f'(Batch: {batch_number or "—"}). '
+                f'(Batch: {batch_number or "—"}{loc_txt}). '
                 f'New total: {new_total}.')
         except Exception as e:
             messages.error(request, f'Error recording Stock In: {e}')
@@ -912,7 +959,7 @@ def stock_adjust_view(request):
                 batch = get_object_or_404(MedicineStock, pk=batch_id, medicine=medicine)
             else:
                 # Adjust the FEFO batch
-                batch = medicine.batches.filter(quantity__gt=0).order_by(
+                batch = medicine.batches.filter(quantity__gt=0, do_not_release=False).order_by(
                     F('expiry_date').asc(nulls_last=True), 'received_at'
                 ).first()
                 if not batch:
@@ -955,7 +1002,7 @@ def stock_medicine_info(request):
         return JsonResponse({'found': False})
     try:
         m = Medicine.objects.select_related('location').prefetch_related('batches').get(pk=pk, is_active=True)
-        fefo = m.batches.filter(quantity__gt=0).order_by(
+        fefo = m.batches.filter(quantity__gt=0, do_not_release=False).order_by(
             F('expiry_date').asc(nulls_last=True), 'received_at'
         ).first()
 
@@ -963,13 +1010,15 @@ def stock_medicine_info(request):
         batches = [
             {
                 'pk':             b.pk,
-                'batch_number':   b.batch_number or '—',
+                'batch_number':   b.batch_number,                       # raw (no more '—')
                 'expiry_date':    str(b.expiry_date) if b.expiry_date else '',
                 'quantity':       b.quantity,
                 'purchase_price': str(b.purchase_price),
                 'supplier_id':    b.supplier_id or '',
                 'is_expired':     b.is_expired,
                 'is_expiring':    b.is_expiring_soon,
+                'do_not_release': b.do_not_release,
+                'location_id':    b.location_id or m.location_id or '',  # effective location
                 'location':       (b.location.code if b.location else (m.location.code if m.location else '')),
             }
             for b in m.batches.filter(quantity__gt=0).select_related('location').order_by(
@@ -994,6 +1043,7 @@ def stock_medicine_info(request):
             'purchase_price': str(fefo.purchase_price) if fefo else '0.00',
             'barcode':        m.barcode or '',
             'batches':        batches,
+            'location_id':    m.location_id or '',
         })
     except Medicine.DoesNotExist:
         return JsonResponse({'found': False})
@@ -3129,6 +3179,7 @@ def dispensing_view(request):
         'page_obj':      page_obj,
         'paginator':     paginator,
         'wards':         Ward.objects.filter(is_active=True),
+        'can_override_req': is_admin(request.user),
     }
     return render(request, 'dispensing.html', context)
 
@@ -3243,8 +3294,26 @@ def dispensing_create(request):
                 today_local      = timezone.localdate()
                 requisition_year = today_local.year
                 requisition_half = 1 if today_local.month <= 6 else 2
-                requisition_seq, requisition_no = _next_requisition(
-                    ward, requisition_year, requisition_half)
+
+                override_raw = str(data.get('requisition_override', '') or '').strip()
+                if override_raw:
+                    if not is_admin(request.user):
+                        return JsonResponse({'error': 'Only administrators can override the requisition number.'}, status=403)
+                    if not request.user.check_password(str(data.get('admin_password', '') or '')):
+                        return JsonResponse({'error': 'Incorrect password.'}, status=403)
+                    try:
+                        requisition_seq = int(override_raw)
+                        if not 1 <= requisition_seq <= 99999:
+                            raise ValueError
+                    except ValueError:
+                        return JsonResponse({'error': 'Override number must be a whole number from 1 to 99999.'}, status=400)
+                    requisition_no = _format_requisition(requisition_seq, ward, requisition_year)
+                    if Dispensing.objects.filter(requisition_no=requisition_no).exists():
+                        return JsonResponse({'error': f'Requisition No. {requisition_no} already exists.'}, status=400)
+                    notes = f'{notes} [Requisition No. manually set by admin {request.user.username}]'.strip()
+                else:
+                    requisition_seq, requisition_no = _next_requisition(
+                        ward, requisition_year, requisition_half)
             else:
                 requisition_no = str(data.get('requisition_no', '') or '').strip()[:100]
                 if not requisition_no:
@@ -3305,6 +3374,8 @@ def dispensing_create(request):
 
             receipt_items.append({
                 'name':       medicine.medicine_name,
+                'brand':      medicine.brand_name,
+                'form':       medicine.get_dosage_form_display(),
                 'strength':   medicine.strength,
                 'qty':        qty,
                 'unit_price': price,
@@ -3358,6 +3429,8 @@ def dispensing_receipt(request, pk):
     items = [
         {
             'name':       item.medicine.medicine_name,
+            'brand':      item.medicine.brand_name,
+            'form':       item.medicine.get_dosage_form_display(),
             'strength':   item.medicine.strength,
             'qty':        item.quantity,
             'unit_price': float(item.unit_price),
@@ -3684,11 +3757,10 @@ def category_create_ajax(request):
 # BATCH MANAGEMENT — AJAX edit + soft-delete
 # ─────────────────────────────────────────────────────────────────────────────
 
-@require('stock_management', 'edit', ajax=True)
 def batch_edit_view(request, pk):
     """
     AJAX POST — edit a MedicineStock batch's correctable fields:
-    batch_number, expiry_date, purchase_price, supplier.
+    batch_number, expiry_date, purchase_price, supplier, location.
     Quantity is NOT editable here — use Stock In / Adjust for that.
     """
     if request.method != 'POST':
@@ -3703,7 +3775,31 @@ def batch_edit_view(request, pk):
         batch.expiry_date = expiry if expiry else None
         supplier_id = data.get('supplier_id', '')
         batch.supplier_id = supplier_id if supplier_id else None
+
+        # ── Location (works for held batches too; DNR status is untouched) ──
+        old_loc = batch.location
+        if 'location_id' in data:
+            loc_id = _to_int(data.get('location_id'))
+            if loc_id:
+                new_loc = StorageLocation.objects.filter(
+                    pk=loc_id, kind=StorageLocation.KIND_SHELF).first()
+                if not new_loc:
+                    return JsonResponse({'error': 'Selected storage location is invalid.'}, status=400)
+                batch.location = new_loc
+            else:
+                batch.location = None
         batch.save()
+
+        if batch.location_id != (old_loc.pk if old_loc else None) and batch.quantity > 0:
+            total = batch.medicine.stock_quantity
+            StockMovement.objects.create(
+                medicine=batch.medicine, batch=batch, movement_type='transfer',
+                quantity=0, quantity_before=total, quantity_after=total,
+                batch_number=batch.batch_number, expiry_date=batch.expiry_date,
+                reference_no=f'TRF {old_loc.code if old_loc else "—"}>{batch.location.code if batch.location else "—"}',
+                notes='Batch location changed via Edit Batch',
+                performed_by=request.user,
+            )
 
         return JsonResponse({
             'success':        True,
@@ -3759,6 +3855,91 @@ def batch_delete_view(request, pk):
             'new_total_stock':new_total,
             'message':        f'Batch "{batch.batch_number or pk}" removed. {removed} units deducted.',
         })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=400)
+
+
+@require('inventory', 'edit', ajax=True)
+def batch_dnr_view(request, pk):
+    """Place a batch on / take it off 'Do Not Release', or permanently remove a
+    held batch from inventory."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Invalid method.'}, status=405)
+    try:
+        with transaction.atomic():
+            batch     = get_object_or_404(MedicineStock.objects.select_for_update(), pk=pk)
+            medicine  = batch.medicine
+            data      = json.loads(request.body or b'{}')
+            action    = data.get('action', 'hold')
+            notes     = str(data.get('notes', '') or '').strip()
+            old_total = medicine.stock_quantity
+            ref       = 'DNR'
+
+            if action == 'hold':
+                reason = data.get('reason', '')
+                if reason not in dict(MedicineStock.DNR_REASON_CHOICES):
+                    return JsonResponse({'error': 'Please select a valid reason.'}, status=400)
+                if batch.do_not_release:
+                    return JsonResponse({'error': 'Batch is already on Do Not Release.'}, status=400)
+                if batch.quantity <= 0:
+                    return JsonResponse({'error': 'Batch is empty.'}, status=400)
+
+                batch.do_not_release = True
+                batch.dnr_reason     = reason
+                batch.dnr_notes      = notes
+                batch.dnr_at         = timezone.now()
+                batch.dnr_by         = request.user
+                batch.save()
+                delta = -batch.quantity
+                label = dict(MedicineStock.DNR_REASON_CHOICES)[reason]
+                log   = f'Do Not Release — {label}' + (f' — {notes}' if notes else '')
+                msg   = f'Batch "{batch.batch_number or pk}" placed on Do Not Release ({label}).'
+
+            elif action == 'unhold':
+                if not batch.do_not_release:
+                    return JsonResponse({'error': 'Batch is not on hold.'}, status=400)
+                prev_label = batch.get_dnr_reason_display()
+                batch.do_not_release = False
+                batch.dnr_reason = ''
+                batch.dnr_notes  = ''
+                batch.dnr_at     = None
+                batch.dnr_by     = None
+                batch.save()
+                delta = batch.quantity
+                log   = f'Do Not Release lifted (was: {prev_label})' + (f' — {notes}' if notes else '')
+                msg   = f'Batch "{batch.batch_number or pk}" is available again.'
+
+            elif action == 'remove':
+                if not batch.do_not_release:
+                    return JsonResponse({'error': 'Only batches on Do Not Release can be removed.'}, status=400)
+                if batch.quantity <= 0:
+                    return JsonResponse({'error': 'Batch is already empty.'}, status=400)
+
+                removed    = batch.quantity
+                prev_label = batch.get_dnr_reason_display()
+                batch.quantity       = 0
+                batch.do_not_release = False      # nothing left to hold; dnr_reason/notes kept as record
+                batch.save()
+                # Held stock was already deducted from the total when the hold was placed,
+                # so the total does not change here -> quantity 0 keeps ledgers/cards correct.
+                delta = 0
+                ref   = 'DNR-REMOVE'
+                log   = (f'Removed from inventory — {removed} unit(s) — {prev_label}'
+                         + (f' — {notes}' if notes else ''))
+                msg   = f'Batch "{batch.batch_number or pk}" removed from inventory ({removed} units).'
+            else:
+                return JsonResponse({'error': 'Invalid action.'}, status=400)
+
+            StockMovement.objects.create(
+                medicine=medicine, batch=batch, movement_type='adjust',
+                quantity=delta, quantity_before=old_total,
+                quantity_after=medicine.stock_quantity,
+                batch_number=batch.batch_number, expiry_date=batch.expiry_date,
+                purchase_price=batch.purchase_price, supplier=batch.supplier,
+                reference_no=ref, notes=log, performed_by=request.user,
+            )
+        messages.success(request, msg)
+        return JsonResponse({'success': True})
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
     
@@ -4024,14 +4205,21 @@ def storage_location_transfer(request):
         def at(loc):   # batches whose effective location is `loc`
             return Q(location=loc) | Q(location__isnull=True, medicine__location=loc)
 
+                # Held (Do Not Release) batches can't be transferred by quantity
         src_batches = list(
-            med.batches.select_for_update().filter(quantity__gt=0).filter(at(src))
+            med.batches.select_for_update()
+            .filter(quantity__gt=0, do_not_release=False).filter(at(src))
             .order_by(F('expiry_date').asc(nulls_last=True), 'received_at')
         )
         available = sum(b.quantity for b in src_batches)
+        held_here = (med.batches.filter(quantity__gt=0, do_not_release=True).filter(at(src))
+                     .aggregate(t=Sum('quantity'))['t'] or 0)
         if qty > available:
+            extra = (f' {held_here} more unit(s) are on Do Not Release and cannot be transferred.'
+                     if held_here else '')
             return JsonResponse({'ok': False,
-                'error': f'Only {available} unit(s) of "{med.medicine_name}" are stored in {src.code}.'}, status=400)
+                'error': f'Only {available} available unit(s) of "{med.medicine_name}" are stored in {src.code}.{extra}'},
+                status=400)
 
         total = med.stock_quantity          # unchanged by a transfer
         remaining = qty
@@ -4039,20 +4227,27 @@ def storage_location_transfer(request):
             if remaining <= 0:
                 break
             take = min(b.quantity, remaining)
-            dest = (med.batches.filter(batch_number=b.batch_number, expiry_date=b.expiry_date)
+            dest = (med.batches.filter(batch_number=b.batch_number, expiry_date=b.expiry_date,
+                                       do_not_release=False)
                     .filter(at(dst)).exclude(pk=b.pk).first())
-            if dest:
+            if dest:                                   # merge into the matching batch at destination
                 dest.quantity += take
                 dest.save()
-            else:
+                b.quantity -= take
+                b.save()
+            elif take == b.quantity:                   # whole batch moves: re-point it, no copy
+                b.location = dst
+                b.save()
+                dest = b
+            else:                                      # partial move: split into a new batch
                 dest = MedicineStock.objects.create(
                     medicine=med, batch_number=b.batch_number, expiry_date=b.expiry_date,
                     quantity=take, purchase_price=b.purchase_price, supplier=b.supplier,
                     location=dst, created_by=request.user,
                 )
                 MedicineStock.objects.filter(pk=dest.pk).update(received_at=b.received_at)
-            b.quantity -= take
-            b.save()
+                b.quantity -= take
+                b.save()
             remaining -= take
 
             StockMovement.objects.create(
@@ -4065,7 +4260,7 @@ def storage_location_transfer(request):
             )
 
         # If nothing is left in the old main location, the main location follows the stock
-        left_at_src = available - qty
+        left_at_src = available - qty + held_here
         moved_primary = False
         if med.location_id == src.pk and left_at_src == 0:
             med.location = dst
@@ -4587,6 +4782,8 @@ def return_log_submit(request):
     reason       = data.get('reason', '')
     notes        = str(data.get('notes', '') or '').strip()
     patient_name = str(data.get('patient_name', '') or '').strip()
+    hpatkey      = str(data.get('ihomis_hpatkey', '') or '').strip()
+    hpercode     = str(data.get('ihomis_hpercode', '') or '').strip()
     restock      = bool(data.get('restock', False))
  
     if reason not in VALID_REASONS:
@@ -4615,6 +4812,7 @@ def return_log_submit(request):
  
             ret = MedicineReturn.objects.create(
                 source=MedicineReturn.SOURCE_LOG, patient_name=patient_name,
+                ihomis_hpatkey=hpatkey, ihomis_hpercode=hpercode,
                 reason=reason, notes=notes, restocked=restock,
                 processed_by=request.user,
             )

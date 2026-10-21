@@ -18,6 +18,7 @@ urlpatterns = [
     path('inventory/delete/<int:pk>/',       views.inventory_delete_view,   name='inventory_delete'),
     path('inventory/barcode/',               views.inventory_barcode_lookup,name='inventory_barcode'),
     path('inventory/stock-adjust/<int:pk>/', views.inventory_stock_adjust,  name='inventory_stock_adjust'),
+    path('inventory/batch/<int:pk>/dnr/', views.batch_dnr_view, name='batch_dnr'),
 
     # ── Medicine search (AJAX) ────────────────────────────────────────────────
     path('api/medicine-search/',    views.medicine_search_ajax,  name='medicine_search_ajax'),

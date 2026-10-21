@@ -184,6 +184,18 @@ textarea.form-control{resize:vertical;min-height:70px}
 /* ── Toast ─────────────────────────────────────────── */
 .toast{position:fixed;bottom:26px;right:26px;background:#1a2433;color:#fff;padding:11px 16px;border-radius:10px;font-size:12.5px;font-weight:500;display:flex;align-items:center;gap:9px;box-shadow:0 8px 24px rgba(0,0,0,.2);z-index:9999;transform:translateY(70px);opacity:0;transition:transform .3s cubic-bezier(.34,1.56,.64,1),opacity .3s;pointer-events:none;max-width:360px}
 .toast.show{transform:translateY(0);opacity:1}.toast.success i{color:#4ade80}.toast.error i{color:#f87171}
+
+
+.batch-hint{display:none;font-size:11.5px;font-weight:600;margin:-4px 0 12px;padding:7px 10px;border-radius:7px}
+.batch-hint.add{display:block;background:#e0f2fe;color:#0369a1}
+.batch-hint.new{display:block;background:rgba(34,197,94,.1);color:#16a34a}
+.batch-hint.warn{display:block;background:rgba(239,68,68,.1);color:#dc2626}
+.batch-item[data-pickable="1"]{cursor:pointer}
+.form-control[readonly]{background:#eef2f7;color:#64748b;cursor:not-allowed}
+
+
+
+
 </style>
 {% endblock %}
 
@@ -230,7 +242,7 @@ textarea.form-control{resize:vertical;min-height:70px}
                         </div>
                     </div>
 
-                    <div class="info-note"><i class="fas fa-circle-info"></i>Each Stock In creates a new batch or adds to an existing batch with the same batch number.</div>
+                    <div class="info-note"><i class="fas fa-circle-info"></i>Click an existing batch above to add more stock to it. Same batch number + same location = added to that batch; otherwise a new batch is created.</div>
 
                     <div class="form-divider">New Batch Details</div>
                     <div class="form-row">
@@ -238,13 +250,28 @@ textarea.form-control{resize:vertical;min-height:70px}
                         <div class="form-group"><label class="form-label">Purchase Price/unit (₱)</label><input type="number" name="purchase_price" id="in_purchase_price" class="form-control" step="0.01" min="0" placeholder="0.00"></div>
                     </div>
                     <div class="form-row">
-                        <div class="form-group"><label class="form-label">Batch Number *</label><input type="text" name="batch_number" id="in_batch" class="form-control" placeholder="e.g. BT-2024-001" required></div>
-                        <div class="form-group"><label class="form-label">Expiry Date *</label><input type="date" name="expiry_date" id="in_expiry" class="form-control" required></div>
+                        <div class="form-group"><label class="form-label">Batch Number *</label><input type="text" name="batch_number" id="in_batch" class="form-control" placeholder="e.g. BT-2024-001" required oninput="onBatchTyped()"></div>
+                        <div class="form-group"><label class="form-label">Expiry Date *</label><input type="date" name="expiry_date" id="in_expiry" class="form-control" required onchange="updateBatchHint()"></div>
                     </div>
+                    <div class="batch-hint" id="in_batch_hint"></div>
+
                     <div class="form-group"><label class="form-label">Supplier</label><select name="supplier" id="in_supplier_sel" class="form-control"><option value="">— Select —</option>{% for s in suppliers %}<option value="{{ s.pk }}">{{ s.name }}</option>{% endfor %}</select></div>
+
+                    <div class="form-group">
+                        <label class="form-label">Store In (Location)</label>
+                        <select name="location" id="in_location_sel" class="form-control" onchange="updateBatchHint()">
+                            <option value="">— Medicine's main location —</option>
+                            {% for a in storage_areas %}{% if a.choices %}
+                            <optgroup label="{{ a.name }}">
+                                {% for l in a.choices %}<option value="{{ l.pk }}">{{ l.code }}{% if l.name and l.name != l.code %} — {{ l.name }}{% endif %}</option>{% endfor %}
+                            </optgroup>
+                            {% endif %}{% endfor %}
+                        </select>
+                    </div>
+
                     <div class="form-group"><label class="form-label">Reference / DR No.</label><input type="text" name="reference_no" class="form-control" placeholder="Delivery receipt or PO number"></div>
                     <div class="form-group"><label class="form-label">Notes</label><textarea name="notes" class="form-control" placeholder="Optional remarks…"></textarea></div>
-                    <button type="submit" class="btn-stock-in"><i class="fas fa-plus-circle"></i>Record Stock In (New Batch)</button>
+                    <button type="submit" class="btn-stock-in"><i class="fas fa-plus-circle"></i><span id="in_submit_label">Record Stock In (New Batch)</span></button>
                 </form>
             </div>
         </div>
@@ -378,7 +405,7 @@ textarea.form-control{resize:vertical;min-height:70px}
                     <td>
                         {% if mv.batch_number %}
                             <span style="font-family:monospace;font-size:11.5px;background:#f0f4f8;padding:2px 6px;border-radius:4px;">{{ mv.batch_number }}</span>
-                            {% if mv.expiry_date %}<div style="font-size:10.5px;color:#94a3b8;margin-top:2px;">Exp: {{ mv.expiry_date|date:"M d, Y" }}</div>{% endif %}
+                            {% if mv.batch and mv.batch.location %}<div style="margin-top:2px"><span class="loc-tag" style="margin-left:0"><i class="fas fa-location-dot" style="font-size:8px"></i> {{ mv.batch.location.code }}</span></div>{% endif %}
                         {% else %}<span style="color:#d1d9e0;font-size:12px;">—</span>{% endif %}
                     </td>
                     <td>
@@ -462,8 +489,15 @@ textarea.form-control{resize:vertical;min-height:70px}
             <div class="modal-form-group">
                 <label class="modal-label">Supplier</label>
                 <select id="editBatchSupplier" class="modal-input">
-                    <option value="">— No change —</option>
-                    {% for s in suppliers %}<option value="{{ s.pk }}">{{ s.name }}</option>{% endfor %}
+            <div class="modal-form-group">
+                <label class="modal-label">Storage Location</label>
+                <select id="editBatchLocation" class="modal-input">
+                    <option value="">— Medicine's main location —</option>
+                    {% for a in storage_areas %}{% if a.choices %}
+                    <optgroup label="{{ a.name }}">
+                        {% for l in a.choices %}<option value="{{ l.pk }}">{{ l.code }}{% if l.name and l.name != l.code %} — {{ l.name }}{% endif %}</option>{% endfor %}
+                    </optgroup>
+                    {% endif %}{% endfor %}
                 </select>
             </div>
         </div>
@@ -574,6 +608,7 @@ function selectMedicineFromEl(tab, el) {
 }
 
 function selectMedicine(tab, med) {
+    if (tab === 'in') clearBatchPick(true);
     document.getElementById(`${tab}_medicine_id`).value = med.pk;
     document.getElementById(`${tab}_search_input`).value = `${med.medicine_name} ${med.strength} (${med.dosage_form})`;
     document.getElementById(`${tab}_picker_dropdown`).classList.remove('open');
@@ -586,6 +621,7 @@ function selectMedicine(tab, med) {
             if (data.found) {
                 currentStockData[tab] = { ...med, ...data };
                 renderBatchList(tab, data.batches || []);
+                if (tab === 'in') updateBatchHint();
                 if (tab === 'adj') {
                     document.getElementById('adj_new_qty').value = data.stock_quantity;
                     calcDiff();
@@ -598,6 +634,8 @@ function selectMedicine(tab, med) {
         if (supEl && med.supplier_id) supEl.value = med.supplier_id;
         const ppEl = document.getElementById('in_purchase_price');
         if (ppEl && med.purchase_price && med.purchase_price !== '0.00') ppEl.value = med.purchase_price;
+        const locEl = document.getElementById('in_location_sel');
+        if (locEl) locEl.value = med.location_id || '';
     }
 }
 
@@ -623,6 +661,7 @@ function updateInfoCard(tab, med) {
 
 // ── Render batch list with edit/delete buttons ────────────
 function renderBatchList(tab, batches) {
+    if (tab === 'in') clearBatchPick(false);   // list is being rebuilt, so drop the old highlight/lock
     // Update batch count for Stock In tab header
     if (tab === 'in') {
         const bEl = document.getElementById('in_info_batches');
@@ -639,16 +678,19 @@ function renderBatchList(tab, batches) {
     itemsWrap.innerHTML = batches.map((b, idx) => {
         const isExpired  = b.is_expired;
         const isExpiring = b.is_expiring;
-        let chip = (idx === 0 && !isExpired)
+        let chip = (idx === 0 && !isExpired && !b.do_not_release)
             ? '<span class="fefo-chip"><i class="fas fa-star"></i>FEFO 1st</span>' : '';
         if (isExpired)  chip += '<span class="fefo-chip expired-chip">Expired</span>';
         if (isExpiring) chip += '<span class="fefo-chip expiring-chip">Expiring</span>';
+        if (b.do_not_release) chip += '<span class="fefo-chip expired-chip">On hold</span>';
         const expiryTxt = b.expiry_date || 'No expiry';
 
-        // Batch item is clickable for adj tab (batch selection)
-        const clickHandler = tab === 'adj'
-            ? `onclick="selectBatch('${tab}',this)"`
-            : '';
+        let clickHandler = '';
+        if (tab === 'adj') {
+            clickHandler = `onclick="selectBatch('${tab}',this)"`;
+        } else if (tab === 'in' && b.batch_number && !b.do_not_release) {
+            clickHandler = `onclick="pickBatchForStockIn(this)" data-pickable="1" title="Click to add stock to this batch"`;
+        }
 
         // Encode batch data safely for the edit modal
         const safeJson = encodeURIComponent(JSON.stringify(b));
@@ -691,6 +733,91 @@ function selectBatch(tab, el) {
     }
 }
 
+
+
+
+// ── Stock In: pick an existing batch ──────────────────────
+let pickedBatchPk = null;
+let pickedBatchNo = '';
+const $id = id => document.getElementById(id);
+
+function pickBatchForStockIn(el) {
+    const wasSelected = el.classList.contains('selected');
+    clearBatchPick(true);
+    if (wasSelected) { updateBatchHint(); return; }      // click again = back to a new batch
+
+    const b = JSON.parse(decodeURIComponent(el.dataset.batchJson));
+    el.classList.add('selected');
+    pickedBatchPk = b.pk;
+    pickedBatchNo = b.batch_number;
+
+    $id('in_batch').value = b.batch_number;
+    const exp = $id('in_expiry');
+    exp.value    = b.expiry_date || '';
+    exp.readOnly = !!b.expiry_date;                      // same batch = same expiry
+    if (b.purchase_price && b.purchase_price !== '0.00') $id('in_purchase_price').value = b.purchase_price;
+    if (b.supplier_id) $id('in_supplier_sel').value = b.supplier_id;
+    $id('in_location_sel').value = b.location_id || '';
+
+    updateBatchHint();
+    const q = document.querySelector('#form-in input[name="quantity"]');
+    if (q) { q.focus(); q.select(); }
+}
+
+function clearBatchPick(clearFields) {
+    document.querySelectorAll('#in_batch_items .batch-item').forEach(x => x.classList.remove('selected'));
+    pickedBatchPk = null;
+    pickedBatchNo = '';
+    const exp = $id('in_expiry');
+    if (exp) exp.readOnly = false;
+    if (clearFields) {
+        if ($id('in_batch')) $id('in_batch').value = '';
+        if (exp) exp.value = '';
+    }
+}
+
+function onBatchTyped() {
+    // user edited the number by hand → no longer "the picked batch"
+    if (pickedBatchPk && $id('in_batch').value.trim() !== pickedBatchNo) clearBatchPick(false);
+    updateBatchHint();
+}
+
+function updateBatchHint() {
+    const hint = $id('in_batch_hint'), label = $id('in_submit_label');
+    const med  = currentStockData['in'];
+    const bn   = $id('in_batch').value.trim();
+    hint.className = 'batch-hint';
+    if (!med || !bn) { label.textContent = 'Record Stock In (New Batch)'; return; }
+
+    const locSel = $id('in_location_sel');
+    const effLoc = String(locSel.value || med.location_id || '');
+    const match  = (med.batches || []).find(b => b.batch_number === bn && String(b.location_id || '') === effLoc);
+
+    if (match) {
+        const expVal = $id('in_expiry').value;
+        if (match.do_not_release) {
+            hint.className = 'batch-hint warn';
+            hint.textContent = `Batch ${bn} is on Do Not Release — lift the hold first.`;
+        } else if (expVal && match.expiry_date && expVal !== match.expiry_date) {
+            hint.className = 'batch-hint warn';
+            hint.textContent = `Batch ${bn} already has expiry ${match.expiry_date}. Use a different batch number for a different expiry.`;
+        } else {
+            hint.className = 'batch-hint add';
+            hint.textContent = `Adding to existing batch ${bn}${match.location ? ' in ' + match.location : ''} (currently ${match.quantity} units).`;
+        }
+        label.textContent = 'Record Stock In (Add to Batch)';
+    } else {
+        const opt = locSel.options[locSel.selectedIndex];
+        const where = locSel.value ? opt.text : (med.location_id ? 'main location' : 'no location');
+        hint.className = 'batch-hint new';
+        hint.textContent = `New batch ${bn} will be created (${where}).`;
+        label.textContent = 'Record Stock In (New Batch)';
+    }
+}
+
+
+
+
 function updateFefoPreview() { /* FEFO done server-side */ }
 
 // ── Batch Edit Modal ──────────────────────────────────────
@@ -703,7 +830,7 @@ function openBatchEdit(pk, safeJson) {
     document.getElementById('editBatchNumber').value        = b.batch_number  || '';
     document.getElementById('editBatchExpiry').value        = b.expiry_date   || '';
     document.getElementById('editBatchPrice').value         = b.purchase_price || '';
-    document.getElementById('editBatchSupplier').value      = b.supplier_id   || '';
+    document.getElementById('editBatchLocation').value      = b.location_id   || '';
     document.getElementById('batchEditModal').classList.add('open');
 }
 
@@ -714,6 +841,7 @@ function submitBatchEdit() {
         expiry_date:    document.getElementById('editBatchExpiry').value,
         purchase_price: document.getElementById('editBatchPrice').value,
         supplier_id:    document.getElementById('editBatchSupplier').value,
+        location_id:    document.getElementById('editBatchLocation').value,
     };
     fetch(BATCH_EDIT_URL + editingBatchPk + '/', {
         method: 'POST',

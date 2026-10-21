@@ -331,6 +331,25 @@
     .req-select, .req-input { width:100%; border:1px solid #e0e6ed; border-radius:8px; padding:8px 11px; font-size:12.5px; font-family:'Poppins',sans-serif; color:#1a2433; outline:none; background:#fff; box-sizing:border-box; transition:border-color .2s,box-shadow .2s; }
     .req-select:focus, .req-input:focus { border-color:#7c3aed; box-shadow:0 0 0 3px rgba(124,58,237,.1); }
     .req-auto-note { display:flex; align-items:center; gap:6px; font-size:11.5px; color:#7c3aed; background:rgba(124,58,237,.06); border-radius:8px; padding:8px 10px; margin-top:8px; }
+
+    /* ── Brand / similar-medicine display ── */
+    .med-card-brand { font-size:11.5px; font-weight:600; color:#7c3aed; margin-bottom:2px; }
+    .med-card-meta  { font-size:10.5px; color:#94a3b8; margin-top:2px; }
+    .cart-item-sub  { font-size:11px; color:#64748b; margin-top:1px; }
+
+    /* ── Admin requisition override ── */
+    .req-override { margin-top:8px; padding:8px 10px; border:1px dashed #d8b4fe; border-radius:8px; background:rgba(124,58,237,.04); }
+    .req-override label { display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:600; color:#7c3aed; cursor:pointer; }
+    .req-override input[type=number] { margin-top:6px; }
+    .pw-modal { background:#fff; border-radius:16px; width:100%; max-width:400px; margin:auto; padding:22px; box-shadow:0 20px 60px rgba(0,0,0,.2); animation:modalIn .25s both; }
+    .pw-modal h3 { font-size:15px; font-weight:700; color:#1a2433; margin:0 0 6px; display:flex; gap:8px; align-items:center; }
+    .pw-modal p { font-size:12.5px; color:#64748b; margin:0 0 12px; }
+    .pw-error { display:none; color:#dc2626; font-size:12px; margin-top:6px; }
+    .pw-error.show { display:block; }
+    .pw-actions { display:flex; gap:10px; margin-top:16px; }
+
+
+
 </style>
 {% endblock %}
 
@@ -625,6 +644,19 @@
                     <i class="fas fa-wand-magic-sparkles"></i>
                     Requisition No. is generated automatically on dispense (0001/Ward/Year) and restarts every 6 months.
                 </div>
+                {% if can_override_req %}
+                <div class="req-override" id="reqOverrideBox" style="display:none;">
+                    <label><input type="checkbox" id="reqOverrideChk" onchange="onOverrideToggle()">
+                        <i class="fas fa-user-shield"></i> Override requisition number (admin)</label>
+                    <div id="reqOverrideInput" style="display:none;">
+                        <input type="number" id="reqOverrideSeq" class="req-input" min="1" max="99999"
+                               placeholder="Starting number, e.g. 125" oninput="updateDispenseButton()">
+                        <div style="font-size:11px;color:#94a3b8;margin-top:4px;">
+                            This transaction uses this number; the next ones continue from it.
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
             </div>
 
         </div>
@@ -705,6 +737,23 @@
     </div>
 </div>
 
+<!-- Admin override confirmation -->
+<div class="modal-overlay" id="pwModal">
+    <div class="pw-modal">
+        <h3><i class="fas fa-shield-halved" style="color:#7c3aed;"></i> Confirm requisition override</h3>
+        <p>Are you sure you want to set the requisition number to
+           <strong id="pwOverrideNo">—</strong>? Numbering will continue from this value.
+           Enter your password to confirm.</p>
+        <input type="password" id="pwInput" class="req-input" placeholder="Your password"
+               autocomplete="current-password" onkeydown="if(event.key==='Enter')confirmOverride()">
+        <div class="pw-error" id="pwError"></div>
+        <div class="pw-actions">
+            <button class="btn-new-txn" onclick="cancelOverride()">Cancel</button>
+            <button class="btn-print" onclick="confirmOverride()"><i class="fas fa-check"></i> Yes, override</button>
+        </div>
+    </div>
+</div>
+
 <div class="toast" id="toast"><i class="fas fa-circle-check"></i><span id="toastMsg"></span></div>
 {% endblock %}
 
@@ -720,6 +769,7 @@ const CSRF_TOKEN          = '{{ csrf_token }}';
 const DOCTOR_SEARCH_URL   = "{% url 'doctor_search_ajax' %}";
 const DOCTOR_VALIDATE_URL = "{% url 'doctor_s2_validate_ajax' %}";
 const PATIENT_SEARCH_URL = "{% url 'patient_search_ajax' %}";
+const CAN_OVERRIDE_REQ = {{ can_override_req|yesno:"true,false" }};
 
 
 // ── Cart State ────────────────────────────────────────────────
@@ -908,11 +958,51 @@ function onPatientTypeChange() {
     document.getElementById('reqNoField').style.display  = t === 'out' ? 'flex' : 'none';
     if (t !== 'in')  document.getElementById('wardSelect').value    = '';
     if (t !== 'out') document.getElementById('requisitionNo').value = '';
+
+    const ob = document.getElementById('reqOverrideBox');   // only exists for admins
+    if (ob) {
+        ob.style.display = t === 'in' ? 'block' : 'none';
+        if (t !== 'in') {
+            document.getElementById('reqOverrideChk').checked = false;
+            onOverrideToggle();
+        }
+    }
     updateDispenseButton();
 }
 function resetRequisition() {
     document.getElementById('patientType').value = '';
     onPatientTypeChange();
+}
+
+function overrideActive() {
+    return CAN_OVERRIDE_REQ
+        && document.getElementById('patientType').value === 'in'
+        && !!document.getElementById('reqOverrideChk')?.checked;
+}
+
+function onOverrideToggle() {
+    const on = document.getElementById('reqOverrideChk').checked;
+    document.getElementById('reqOverrideInput').style.display = on ? 'block' : 'none';
+    if (!on) document.getElementById('reqOverrideSeq').value = '';
+    updateDispenseButton();
+}
+
+function showPwError(msg) {
+    const e = document.getElementById('pwError');
+    e.textContent = msg;
+    e.classList.add('show');
+}
+
+function cancelOverride() {
+    closeModal('pwModal');
+    document.getElementById('pwInput').value = '';
+    updateDispenseButton();
+}
+
+function confirmOverride() {
+    const pw = document.getElementById('pwInput').value;
+    if (!pw) { showPwError('Enter your password.'); return; }
+    sendDispense(pw);
 }
 
 // Close dropdown on outside click
@@ -958,6 +1048,8 @@ function updateDispenseButton() {
         let missing = '';
         if(!pt) missing = 'Select Patient Type';
         else if(pt === 'in'  && !document.getElementById('wardSelect').value) missing = 'Select Ward';
+        else if(pt === 'in'  && overrideActive() &&
+                !(parseInt(document.getElementById('reqOverrideSeq').value) >= 1)) missing = 'Enter Override Number';
         else if(pt === 'out' && !document.getElementById('requisitionNo').value.trim()) missing = 'Enter Requisition No.';
         if(missing) {
             btn.disabled = true;
@@ -992,29 +1084,35 @@ function fetchMedicines(q) {
         .catch(() => showToast('Search failed.', 'error'));
 }
 
+let medCache = {};
+
 function renderMedGrid(results) {
     const grid = document.getElementById('medGrid');
+    medCache = {};
     if(!results.length) {
         grid.innerHTML = `<div class="med-grid-empty"><i class="fas fa-pills"></i><p>No medicines found.</p></div>`;
         return;
     }
     grid.innerHTML = results.map(m => {
+        medCache[m.pk] = m;
         const stockClass = m.stock_status === 'out_of_stock' ? 'stock-out' :
                            m.stock_status === 'low_stock'    ? 'stock-low' : 'stock-ok';
         const stockLabel = m.stock_status === 'out_of_stock' ? 'Out of Stock' :
                            m.stock_status === 'low_stock'    ? `Low: ${m.stock_quantity}` :
                            `${m.stock_quantity} units`;
         const isOut = m.stock_status === 'out_of_stock';
+        const meta = [m.manufacturer, m.expiry_date ? 'Exp ' + m.expiry_date : ''].filter(Boolean).join(' · ');
         return `
-        <div class="med-card ${isOut ? 'out-of-stock' : ''}"
-             onclick="${isOut ? '' : `addToCart(${m.pk},'${escHtml(m.medicine_name)}','${escHtml(m.strength)}','${escHtml(m.dosage_form)}',${m.selling_price},${m.stock_quantity},${m.is_s2_regulated ? 'true' : 'false'})`}">
+        <div class="med-card ${isOut ? 'out-of-stock' : ''}" ${isOut ? '' : `onclick="addToCart(medCache[${m.pk}])"`}>
             <div class="med-card-add-icon"><i class="fas fa-plus"></i></div>
             <div class="med-card-name">
                 ${escHtml(m.medicine_name)}
                 ${m.is_s2_regulated ? '<span style="display:inline-flex;align-items:center;gap:3px;background:rgba(124,58,237,.12);color:#7c3aed;border-radius:20px;padding:1px 6px;font-size:9px;font-weight:700;margin-left:4px;vertical-align:middle;"><i class="fas fa-shield-halved" style="font-size:8px;"></i> S2</span>' : ''}
             </div>
+            ${m.brand_name ? `<div class="med-card-brand">${escHtml(m.brand_name)}</div>` : ''}
             <div class="med-card-generic">${escHtml(m.generic_name)}</div>
-            <div class="med-card-form">${escHtml(m.dosage_form)} · ${escHtml(m.strength)}</div>
+            <div class="med-card-form">${escHtml(m.strength)} · ${escHtml(m.dosage_form)}</div>
+            ${meta ? `<div class="med-card-meta">${escHtml(meta)}</div>` : ''}
             <div class="med-card-bottom">
                 <span class="med-card-price">₱${parseFloat(m.selling_price || 0).toFixed(2)}</span>
                 <span class="med-card-stock ${stockClass}">${stockLabel}</span>
@@ -1030,20 +1128,25 @@ function escHtml(s) {
 }
 
 // ── Cart Operations ───────────────────────────────────────────
-function addToCart(pk, name, strength, dosage, price, stock, isS2 = false) {
-    const existing = cart.find(i => i.pk === pk);
+function addToCart(m) {
+    const existing = cart.find(i => i.pk === m.pk);
     if(existing) {
-        if(existing.qty >= stock) {
-            showToast(`Only ${stock} units available.`, 'error');
+        if(existing.qty >= m.stock_quantity) {
+            showToast(`Only ${m.stock_quantity} units available.`, 'error');
             return;
         }
         existing.qty++;
     } else {
-        cart.push({ pk, name, strength, dosage, price: parseFloat(price), qty: 1, stock, isS2 });
+        cart.push({
+            pk: m.pk, name: m.medicine_name, brand: m.brand_name || '',
+            strength: m.strength, dosage: m.dosage_form,
+            price: parseFloat(m.selling_price), qty: 1,
+            stock: m.stock_quantity, isS2: !!m.is_s2_regulated
+        });
     }
     renderCart();
     checkS2Cart();
-    showToast(`${name} added to cart.`, 'success');
+    showToast(`${m.medicine_name}${m.brand_name ? ' (' + m.brand_name + ')' : ''} added to cart.`, 'success');
 }
 
 // +/− buttons: update without full re-render
@@ -1147,7 +1250,8 @@ function renderCart() {
         <div class="cart-item" data-pk="${item.pk}">
             <div class="cart-item-info">
                 <div class="cart-item-name">${escHtml(item.name)} ${escHtml(item.strength)}</div>
-                <div class="cart-item-price">₱${item.price.toFixed(2)} / unit · ${escHtml(item.dosage)}</div>
+                <div class="cart-item-sub">${item.brand ? escHtml(item.brand) + ' · ' : ''}${escHtml(item.dosage)}</div>
+                <div class="cart-item-price">₱${item.price.toFixed(2)} / unit</div>
             </div>
             <div class="cart-qty-ctrl">
                 <button class="qty-btn" onclick="changeQty(${item.pk}, -1)">−</button>
@@ -1186,6 +1290,23 @@ function recalcTotals() {
 // ── Submit Dispensing ─────────────────────────────────────────
 function submitDispensing() {
     if(!cart.length) return;
+
+    // Admin override → ask "are you sure" + password first
+    if (cartHasS2() && overrideActive()) {
+        const seq  = document.getElementById('reqOverrideSeq').value;
+        const ward = document.getElementById('wardSelect').selectedOptions[0].text;
+        document.getElementById('pwOverrideNo').textContent =
+            String(seq).padStart(4, '0') + ' / ' + ward + ' / ' + new Date().getFullYear();
+        document.getElementById('pwInput').value = '';
+        document.getElementById('pwError').classList.remove('show');
+        openModal('pwModal');
+        setTimeout(() => document.getElementById('pwInput').focus(), 100);
+        return;
+    }
+    sendDispense(null);
+}
+
+function sendDispense(adminPassword) {
     const btn = document.getElementById('btnDispense');
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing…';
@@ -1197,18 +1318,25 @@ function submitDispensing() {
     discount = Math.min(discount, subtotal);
 
     const payload = {
-      customer_name:   document.getElementById('customerName').value.trim() || 'Walk-in',
-      prescription_no: document.getElementById('prescriptionNo').value.trim(),
-      notes:           document.getElementById('customerNotes').value.trim(),
-      discount_amount: discount.toFixed(2),
-      doctor_pk:       selectedDoctor ? selectedDoctor.pk : '',
-      patient_type:    cartHasS2() ? document.getElementById('patientType').value : '',
-      ward_pk:         cartHasS2() ? document.getElementById('wardSelect').value : '',
-      requisition_no:  cartHasS2() ? document.getElementById('requisitionNo').value.trim() : '',
-      ihomis_hpatkey:  selectedPatient ? selectedPatient.hpatkey  : '',   // ← ADD
-      ihomis_hpercode: selectedPatient ? selectedPatient.hospital_number : '',  // ← ADD
-      items: cart.map(i => ({ medicine_pk: i.pk, quantity: i.qty, unit_price: i.price })),
-  };
+        customer_name:   document.getElementById('customerName').value.trim() || 'Walk-in',
+        prescription_no: document.getElementById('prescriptionNo').value.trim(),
+        notes:           document.getElementById('customerNotes').value.trim(),
+        discount_amount: discount.toFixed(2),
+        doctor_pk:       selectedDoctor ? selectedDoctor.pk : '',
+        patient_type:    cartHasS2() ? document.getElementById('patientType').value : '',
+        ward_pk:         cartHasS2() ? document.getElementById('wardSelect').value : '',
+        requisition_no:  cartHasS2() ? document.getElementById('requisitionNo').value.trim() : '',
+        requisition_override: adminPassword ? document.getElementById('reqOverrideSeq').value : '',
+        admin_password:  adminPassword || '',
+        ihomis_hpatkey:  selectedPatient ? selectedPatient.hpatkey : '',
+        ihomis_hpercode: selectedPatient ? selectedPatient.hospital_number : '',
+        items: cart.map(i => ({ medicine_pk: i.pk, quantity: i.qty, unit_price: i.price })),
+    };
+
+    const resetBtn = () => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-check-circle"></i> Dispense & Generate Receipt';
+    };
 
     fetch(DISPENSE_URL, {
         method: 'POST',
@@ -1218,6 +1346,8 @@ function submitDispensing() {
     .then(r => r.json())
     .then(data => {
         if(data.success) {
+            closeModal('pwModal');
+            document.getElementById('pwInput').value = '';
             showToast('Dispensing recorded successfully!', 'success');
             renderReceipt(data.receipt);
             openModal('receiptModal');
@@ -1225,15 +1355,19 @@ function submitDispensing() {
             renderCart();
             setTimeout(() => window.location.reload(), 3000);
         } else {
+            if (adminPassword) {                       // keep modal open (e.g. wrong password)
+                showPwError(data.error || 'Something went wrong.');
+                resetBtn();
+                return;
+            }
             showToast(data.error || 'Something went wrong.', 'error');
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-check-circle"></i> Dispense & Generate Receipt';
+            resetBtn();
         }
     })
     .catch(() => {
-        showToast('Network error.', 'error');
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-check-circle"></i> Dispense & Generate Receipt';
+        if (adminPassword) showPwError('Network error.');
+        else showToast('Network error.', 'error');
+        resetBtn();
     });
 }
 
@@ -1261,7 +1395,7 @@ function renderReceipt(r) {
         <div class="receipt-items">
             ${r.items.map(item => `
             <div class="receipt-item">
-                <div class="receipt-item-name">${item.name} ${item.strength}</div>
+                <div class="receipt-item-name">${item.name}${item.brand ? ' (' + item.brand + ')' : ''} ${item.strength}</div>
                 <div class="receipt-item-detail">
                     <span>${item.qty} x ₱${parseFloat(item.unit_price).toFixed(2)}</span>
                     <span>₱${parseFloat(item.subtotal).toFixed(2)}</span>
@@ -1362,8 +1496,7 @@ function handleBarcodeScan(barcode) {
                 if(m.stock_status === 'out_of_stock') {
                     showToast(`${m.medicine_name} is out of stock.`, 'error');
                 } else {
-                    addToCart(m.pk, m.medicine_name, m.strength, m.dosage_form,
-                              m.selling_price, m.stock_quantity);
+                    addToCart(m);
                     document.getElementById('medSearch').value = m.medicine_name;
                     renderMedGrid(data.results);
                 }

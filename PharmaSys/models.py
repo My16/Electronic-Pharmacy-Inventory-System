@@ -374,7 +374,7 @@ class Medicine(models.Model):
     # ── Aggregated stock across all batches ───────────────────
     @property
     def stock_quantity(self):
-        result = self.batches.filter(quantity__gt=0).aggregate(total=Sum('quantity'))
+        result = self.batches.filter(do_not_release=False, quantity__gt=0).aggregate(total=Sum('quantity'))
         return result['total'] or 0
 
     @property
@@ -390,6 +390,7 @@ class Medicine(models.Model):
         """True if the earliest-expiring active batch expires within 90 days."""
         threshold = timezone.now().date() + timezone.timedelta(days=90)
         return self.batches.filter(
+            do_not_release=False,
             quantity__gt=0,
             expiry_date__isnull=False,
             expiry_date__lte=threshold,
@@ -400,6 +401,7 @@ class Medicine(models.Model):
     def is_expired(self):
         """True if any active batch is expired."""
         return self.batches.filter(
+            do_not_release=False,
             quantity__gt=0,
             expiry_date__isnull=False,
             expiry_date__lt=timezone.now().date(),
@@ -409,6 +411,7 @@ class Medicine(models.Model):
     def earliest_expiry(self):
         """The soonest expiry date among active batches, or None."""
         batch = self.batches.filter(
+            do_not_release=False,
             quantity__gt=0, expiry_date__isnull=False
         ).order_by('expiry_date').first()
         return batch.expiry_date if batch else None
@@ -424,7 +427,7 @@ class Medicine(models.Model):
     # Legacy shim so old code that reads medicine.purchase_price still works
     @property
     def purchase_price(self):
-        batch = self.batches.filter(quantity__gt=0).order_by('expiry_date').first()
+        batch = self.batches.filter(do_not_release=False, quantity__gt=0).order_by('expiry_date').first()
         return batch.purchase_price if batch else 0
 
     class Meta:
@@ -461,6 +464,22 @@ class MedicineStock(models.Model):
                          'StorageLocation', on_delete=models.SET_NULL,
                          null=True, blank=True, related_name='batches',
                          help_text='Where this batch physically sits. Blank = the medicine\'s main location')
+
+
+        # ── Do Not Release (hold) ─────────────────────────────────
+    DNR_REASON_CHOICES = [
+        ('rts_replacement',    'Return to Supplier - Replacement'),
+        ('rts_no_replacement', 'Return to Supplier - No Replacement (Above 18 Months Delivery)'),
+        ('rts_credit_memo',    'Return to Supplier - Credit Memo'),
+        ('rts_recall',         'Return to Supplier - Product Recall'),
+        ('donation',           'For Donation'),
+    ]
+    do_not_release = models.BooleanField(default=False, db_index=True)
+    dnr_reason     = models.CharField(max_length=30, choices=DNR_REASON_CHOICES, blank=True)
+    dnr_notes      = models.TextField(blank=True)
+    dnr_at         = models.DateTimeField(null=True, blank=True)
+    dnr_by         = models.ForeignKey(User, on_delete=models.SET_NULL,
+                                       null=True, blank=True, related_name='dnr_batches')
 
     def __str__(self):
         exp = str(self.expiry_date) if self.expiry_date else 'no expiry'

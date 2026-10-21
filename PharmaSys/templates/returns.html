@@ -409,7 +409,15 @@
       </div>
       <div>
         <label class="field-lbl">Patient Name</label>
-        <input type="text" id="rlPatient" class="field-in" placeholder="e.g. Juan dela Cruz">
+        <div class="pat-search-box" id="rlPatBox">
+          <i class="fas fa-magnifying-glass s-icon"></i>
+          <input type="text" id="rlPatient" class="field-in" autocomplete="off"
+                placeholder="Search patient from iHOMIS+…">
+          <div class="dd" id="rlPatDD"></div>
+        </div>
+        <div id="rlPatTag" style="display:none;margin-top:6px;font-size:11px;color:var(--teal-dim);font-weight:600;">
+          <i class="fas fa-link"></i> Linked to iHOMIS+ · HN <span id="rlPatHN"></span>
+        </div>
       </div>
       <div>
         <label class="field-lbl">Reason for Return</label>
@@ -423,7 +431,7 @@
         <textarea id="rlNotes" class="field-ta" placeholder="Optional notes…"></textarea>
       </div>
       <label class="chk-lbl" style="align-items:flex-start;">
-        <input type="checkbox" id="rlRestock" style="margin-top:3px;" onchange="toggleBatchCol()">
+        <input type="checkbox" id="rlRestock" style="margin-top:3px;" checked onchange="toggleBatchCol()">
         <span>Add returned quantities back to stock<br>
           <small style="color:#94a3b8;">Off = record only. On = pick the batch each line returns into
             (or leave it on “New batch” to add a batch with no expiry).</small></span>
@@ -907,12 +915,55 @@ function addLine() {
   });
 }
 
+// ── patient name typeahead (iHOMIS+) ─────────────────────────────────────
+let rlPat = null;   // {hpatkey, hospital_number, name} when a patient was picked
+const rlPatInput = document.getElementById('rlPatient');
+const rlPatDD    = document.getElementById('rlPatDD');
+
+function setRlPatient(p) {
+  rlPat = p;
+  document.getElementById('rlPatTag').style.display = p ? 'block' : 'none';
+  document.getElementById('rlPatHN').textContent = p ? p.hospital_number : '';
+}
+
+const rlPatSearch = debounce(function () {
+  const q = rlPatInput.value.trim();
+  if (rlPat || q.length < 2) { rlPatDD.classList.remove('open'); return; }
+  rlPatDD.innerHTML = '<div class="dd-msg"><i class="fas fa-circle-notch spin" style="color:var(--teal);"></i> Searching…</div>';
+  rlPatDD.classList.add('open');
+  fetch(PATIENT_SEARCH_URL + '?q=' + encodeURIComponent(q), { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(r => r.json())
+    .then(d => {
+      const list = d.results || [];
+      if (d.error)      { rlPatDD.innerHTML = `<div class="dd-msg">iHOMIS+ unavailable: ${escHtml(d.error)}</div>`; return; }
+      if (!list.length) { rlPatDD.innerHTML = '<div class="dd-msg">No patients found. You can still type the name manually.</div>'; return; }
+      rlPatDD.innerHTML = list.map((p, i) => `
+        <div class="dd-opt" data-i="${i}">
+          <div class="hn">${escHtml(p.hospital_number)}</div>
+          <div class="nm">${escHtml(p.full_name_formal)}</div>
+          <div class="sub">${escHtml(p.birthdate || '—')} · ${escHtml(p.sex || '—')}</div>
+        </div>`).join('');
+      rlPatDD.querySelectorAll('.dd-opt').forEach(el => el.addEventListener('mousedown', ev => {
+        ev.preventDefault();
+        const p = list[+el.dataset.i];
+        rlPatInput.value = p.full_name || p.full_name_formal;
+        setRlPatient({ hpatkey: p.hpatkey, hospital_number: p.hospital_number });
+        rlPatDD.classList.remove('open');
+      }));
+    })
+    .catch(() => { rlPatDD.innerHTML = '<div class="dd-msg">Network error — could not reach iHOMIS+.</div>'; });
+}, 320);
+
+rlPatInput.addEventListener('input', () => { setRlPatient(null); rlPatSearch(); });   // editing unlinks
+rlPatInput.addEventListener('blur',  () => setTimeout(() => rlPatDD.classList.remove('open'), 150));
+
 function resetLog() {
   rlBody.innerHTML = '';
   for (let i = 0; i < 5; i++) addLine();
   ['rlPatient', 'rlNotes'].forEach(id => document.getElementById(id).value = '');
+  setRlPatient(null);
   document.getElementById('rlReason').value = '';
-  document.getElementById('rlRestock').checked = false;
+  document.getElementById('rlRestock').checked = true;   // default ON
   toggleBatchCol();
 }
 
@@ -937,7 +988,9 @@ function submitLog() {
   const btn = document.getElementById('rlSubmit');
   btn.disabled = true;
   postJSON(LOG_SUBMIT_URL, {
-    patient_name: document.getElementById('rlPatient').value,
+    patient_name:    document.getElementById('rlPatient').value,
+    ihomis_hpatkey:  rlPat ? rlPat.hpatkey : '',
+    ihomis_hpercode: rlPat ? rlPat.hospital_number : '',
     reason,
     notes:   document.getElementById('rlNotes').value,
     restock: document.getElementById('rlRestock').checked,
