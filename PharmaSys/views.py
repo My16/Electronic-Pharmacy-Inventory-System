@@ -2656,14 +2656,25 @@ def consumption_report(request):
             delta = sum(m.quantity for m in movements_since)  # signed integer
             previous_balance = max(med.stock_quantity - delta, 0)
  
-        # ── Received during Month ────────────────────────────────────────────
+        # ── Received during Month (deliveries + non-ward returns) ───────────
         received_qs = StockMovement.objects.filter(
             medicine=med,
             movement_type__in=['in', 'return'],
             created_at__gte=period_start,
             created_at__lt=period_end,
         ).aggregate(total=Sum('quantity'))
-        received = received_qs['total'] or 0
+        received_all = received_qs['total'] or 0
+
+        # ── Returned (all restocked returns) ────────────────────────────────
+        returned_ward = StockMovement.objects.filter(
+            medicine=med,
+            movement_type='return',
+            created_at__gte=period_start,
+            created_at__lt=period_end,
+        ).aggregate(total=Sum('quantity'))['total'] or 0
+
+        # Returns were already inside `received_all`; split them out
+        received = received_all - returned_ward
  
         # ── Consumed during Month ────────────────────────────────────────────
         # a) Dispensing — DispensingItem is the source of truth for dispensed qty.
@@ -2688,7 +2699,7 @@ def consumption_report(request):
         consumed = dispensed + manual_out
  
         # ── Balance on Hand ──────────────────────────────────────────────────
-        balance_on_hand = previous_balance + received - consumed
+        balance_on_hand = previous_balance + received + returned_ward - consumed
  
         # ── Unit of Measure ──────────────────────────────────────────────────
         uom = med.dosage_form  # tablet / capsule / vial / etc.
@@ -2701,10 +2712,12 @@ def consumption_report(request):
             'received':         received,
             'consumed':         consumed,
             'balance_on_hand':  balance_on_hand,
+            'returned_ward':     returned_ward,
         })
  
     # ── 3. Compute totals ─────────────────────────────────────────────────────
     total_received = sum(r['received']         for r in rows)
+    total_returned_ward = sum(r['returned_ward'] for r in rows)
     total_consumed = sum(r['consumed']         for r in rows)
     total_balance  = sum(r['balance_on_hand']  for r in rows)
  
@@ -2728,6 +2741,7 @@ def consumption_report(request):
         'period_end':        period_end,
         'today':             today,
         'total_received':    total_received,
+        'total_returned_ward': total_returned_ward,
         'total_consumed':    total_consumed,
         'total_balance':     total_balance,
         'last_day_of_month': last_day_of_month,
@@ -4330,6 +4344,54 @@ def storage_find_medicine(request):
                 'area_id': loc.area_id, 'area': loc.area.name, 'supply_office': loc.is_supply_office,
             })
     return JsonResponse({'results': results})
+
+
+# ── JSON: every medicine in an AREA, merged across its locations (Compare) ───
+@require(('storage_locations', 'inventory'), ajax=True)
+def storage_area_medicines(request, pk):
+    area  = get_object_or_404(StorageArea, pk=pk)
+    today = timezone.now().date()
+    soon  = today + timedelta(days=EXPIRY_WINDOW_DAYS)
+    pl    = _placements()
+    locs  = list(area.locations.filter(kind=StorageLocation.KIND_SHELF).order_by('code'))
+
+    merged = {}
+    for loc in locs:
+        for mid, e in pl.get(loc.pk, {}).items():
+            row = merged.setdefault(mid, {'med': e['med'], 'qty': 0, 'rel': 0,
+                                          'expiry': None, 'locs': []})
+            row['qty'] += e['qty']
+            row['rel'] += e['rel']
+            if e['expiry'] and (row['expiry'] is None or e['expiry'] < row['expiry']):
+                row['expiry'] = e['expiry']
+            row['locs'].append({
+                'id': loc.pk, 'code': loc.code, 'name': loc.name, 'qty': e['qty'],
+                'locked': loc.is_locked, 'supply_office': loc.is_supply_office,
+            })
+
+    rows = []
+    for e in sorted(merged.values(), key=lambda e: e['med'].medicine_name.lower()):
+        m, exp = e['med'], e['expiry']
+        if not exp:
+            exp_state = ''
+        elif exp < today:
+            exp_state = 'expired'
+        elif exp <= soon:
+            exp_state = 'soon'
+        else:
+            exp_state = 'ok'
+        rows.append({
+            'id': m.pk, 'name': m.medicine_name, 'generic': m.generic_name,
+            'brand': m.brand_name, 'strength': m.strength,
+            'form': m.get_dosage_form_display(),
+            'qty': e['qty'], 'rel': e['rel'], 'total': m.total_qty,
+            'status': _stock_state(m),
+            'expiry': exp.strftime('%b %d, %Y') if exp else '', 'expiry_state': exp_state,
+            's2': m.is_s2_regulated,
+            'locs': e['locs'],
+        })
+    return JsonResponse({'id': area.pk, 'area': area.name,
+                         'location_count': len(locs), 'medicines': rows})
 
 
 # ── Transfer stock between locations ─────────────────────────────────────────

@@ -393,6 +393,10 @@
         <div class="cr-badge-label">Total Received</div>
         <div class="cr-badge-value">{{ total_received }}</div>
     </div>
+    <div class="cr-badge blue">
+        <div class="cr-badge-label">Returned from Ward</div>
+        <div class="cr-badge-value">{{ total_returned_ward }}</div>
+    </div>
     <div class="cr-badge red">
         <div class="cr-badge-label">Total Consumed</div>
         <div class="cr-badge-value">{{ total_consumed }}</div>
@@ -416,6 +420,7 @@
             <th>Unit of Measure</th>
             <th class="num">Previous Balance</th>
             <th class="num">Received during the Month</th>
+            <th class="num">Returned from Ward</th>
             <th class="num">Consumed during the Month</th>
             <th class="num">Balance on Hand</th>
         </tr>
@@ -432,6 +437,9 @@
             </td>
             <td class="num {% if row.received == 0 %}zero{% endif %}">
                 {{ row.received }}
+            </td>
+            <td class="num {% if row.returned_ward == 0 %}zero{% endif %}">
+                {{ row.returned_ward }}
             </td>
             <td class="num {% if row.consumed == 0 %}zero{% endif %}">
                 {{ row.consumed }}
@@ -492,10 +500,12 @@
                 <th rowspan="2" style="width:60px;">Unit of Measure</th>
                 <th rowspan="2" style="width:70px;">Previous Balance</th>
                 <th>Received during the Month</th>
+                <th>Returned from Ward</th>
                 <th>Consumed during the Month</th>
                 <th rowspan="2" style="width:70px;">Balance on Hand</th>
             </tr>
             <tr>
+                <th style="width:70px;">Qty</th>
                 <th style="width:70px;">Qty</th>
                 <th style="width:70px;">Qty</th>
             </tr>
@@ -508,6 +518,7 @@
                 <td style="text-align:center;text-transform:capitalize;">{{ row.unit_of_measure }}</td>
                 <td class="num">{% if row.previous_balance %}{{ row.previous_balance }}{% endif %}</td>
                 <td class="num">{% if row.received %}{{ row.received }}{% endif %}</td>
+                <td class="num">{% if row.returned_ward %}{{ row.returned_ward }}{% endif %}</td>
                 <td class="num">{% if row.consumed %}{{ row.consumed }}{% endif %}</td>
                 <td class="num">{% if row.balance_on_hand %}{{ row.balance_on_hand }}{% endif %}</td>
             </tr>
@@ -516,7 +527,7 @@
             {% for i in "12345"|make_list %}
             <tr>
                 <td>&nbsp;</td><td></td><td></td><td></td>
-                <td></td><td></td><td></td>
+                <td></td><td></td><td></td><td></td>
             </tr>
             {% endfor %}
         </tbody>

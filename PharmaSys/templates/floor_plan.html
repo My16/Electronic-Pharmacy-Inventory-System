@@ -283,6 +283,14 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
 .cmp-also{display:inline-flex;gap:4px;align-items:center;background:rgba(0,173,181,.1);color:#00ADB5;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;margin:3px 4px 0 0}
 .cmp-empty{text-align:center;padding:36px 14px;color:#90a4ae;font-size:12.5px}
 
+.cmp-allrow{display:flex;align-items:center;gap:7px;padding:8px 10px;border-bottom:1px solid #f0f4f8;background:#f8fafc;font-size:11.5px;font-weight:600;color:#64748b;cursor:pointer}
+.cmp-allrow input{accent-color:#00ADB5}
+.cmp-locs{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.cmp-loc{display:inline-flex;align-items:center;gap:4px;background:#f0f4f8;color:#475569;border:1px solid #e0e6ed;border-radius:6px;padding:1px 7px;font-size:10px;font-weight:700}
+.cmp-loc.lock{background:#e2e8f0;color:#475569}
+.cmp-loc.so{background:rgba(59,91,219,.12);border-color:rgba(59,91,219,.3);color:#3b5bdb}
+.cmp-pane-head select:disabled{opacity:.5;cursor:not-allowed}
+
 
 .si-batches{margin-top:14px;border:1px solid #bae6fd;background:#f0f9ff;border-radius:10px;padding:10px 12px;display:none}
 .si-batches.show{display:block}
@@ -688,6 +696,7 @@ var CSRF = '{{ csrf_token }}';
 var URLS = {
     inventory:     "{% url 'inventory' %}",
     meds:          "{% url 'storage_location_medicines' pk=0 %}",
+    area_meds:       "{% url 'storage_area_medicines' pk=0 %}",
     find:          "{% url 'storage_find' %}",
     layout:        "{% url 'storage_location_layout' %}",
     area_create:   "{% url 'storage_area_create' %}",
@@ -1437,43 +1446,57 @@ function submitLock() {
 
 /* ── Compare locations side by side ─────────────────────── */
 var CMP_MAX = 3;
-var cmp = { panes: [], cache: {} };      // pane = { areaId, locId }
+var cmp = { panes: [], cache: {} };      // pane = { areaId, locId, all }
 
 function cmpOtherArea(not) {
     for (var i = 0; i < PLAN.length; i++) if (PLAN[i].id !== not && shelvesIn(PLAN[i]).length) return PLAN[i].id;
     return not;
 }
+function cmpKey(p)  { return p.all ? 'a' + p.areaId : (p.locId ? 'l' + p.locId : null); }
+function cmpData(p) { var k = cmpKey(p); return k ? cmp.cache[k] : null; }
+
 function openCompare(locId) {
     if (!PLAN.length) { showToast('There are no areas to compare yet.', 'error'); return; }
     var l = locId ? locById(locId) : null, a = l ? areaOfLoc(locId) : curArea();
     var a1 = a ? a.id : PLAN[0].id;
-    cmp.panes = [ { areaId: a1, locId: l ? l.id : null }, { areaId: cmpOtherArea(a1), locId: null } ];
+    cmp.panes = [ { areaId: a1, locId: l ? l.id : null, all: false },
+                  { areaId: cmpOtherArea(a1), locId: null, all: false } ];
     cmp.cache = {};
     document.getElementById('cmpFilter').value = '';
     document.getElementById('cmpCommon').checked = false;
     renderCompare();
     openModal('cmpModal');
-    if (l) cmpLoad(l.id);
+    if (l) cmpLoadPane(cmp.panes[0]);
 }
-function cmpLoad(id) {
-    if (!id || cmp.cache[id]) return;
-    cmp.cache[id] = { loading: true };
-    fetch(u(URLS.meds, id), { credentials: 'same-origin' })
+function cmpLoadPane(p) {
+    var k = cmpKey(p);
+    if (!k || cmp.cache[k]) return;
+    cmp.cache[k] = { loading: true };
+    var url = p.all ? u(URLS.area_meds, p.areaId) : u(URLS.meds, p.locId);
+    fetch(url, { credentials: 'same-origin' })
         .then(function(r) { return r.json(); })
-        .then(function(d) { cmp.cache[id] = d; renderCompare(); })
-        .catch(function() { cmp.cache[id] = { error: true }; renderCompare(); });
+        .then(function(d) { cmp.cache[k] = d; renderCompare(); })
+        .catch(function() { cmp.cache[k] = { error: true }; renderCompare(); });
 }
-function cmpSetArea(i, areaId) { cmp.panes[i] = { areaId: Number(areaId), locId: null }; renderCompare(); }
-function cmpSetLoc(i, locId) {
-    var id = locId ? Number(locId) : null;
-    cmp.panes[i].locId = id;
+function cmpSetArea(i, areaId) {
+    cmp.panes[i] = { areaId: Number(areaId), locId: null, all: cmp.panes[i].all };
     renderCompare();
-    if (id) cmpLoad(id);
+    cmpLoadPane(cmp.panes[i]);
+}
+function cmpSetLoc(i, locId) {
+    cmp.panes[i].locId = locId ? Number(locId) : null;
+    renderCompare();
+    cmpLoadPane(cmp.panes[i]);
+}
+function cmpSetAll(i, on) {
+    cmp.panes[i].all = !!on;
+    renderCompare();
+    cmpLoadPane(cmp.panes[i]);
 }
 function cmpAddPane() {
     if (cmp.panes.length >= CMP_MAX) return;
     var last = cmp.panes[cmp.panes.length - 1];
-    cmp.panes.push({ areaId: last ? last.areaId : PLAN[0].id, locId: null });
+    cmp.panes.push({ areaId: last ? last.areaId : PLAN[0].id, locId: null, all: false });
     renderCompare();
 }
 function cmpRemovePane(i) { if (cmp.panes.length > 2) { cmp.panes.splice(i, 1); renderCompare(); } }
@@ -1493,32 +1516,56 @@ function renderCompare() {
 
     var presence = {};      // medicine id -> pane indexes that hold it
     cmp.panes.forEach(function(p, i) {
-        var d = p.locId ? cmp.cache[p.locId] : null;
+        var d = cmpData(p);
         if (d && d.medicines) d.medicines.forEach(function(m) { (presence[m.id] = presence[m.id] || []).push(i); });
     });
     grid.innerHTML = cmp.panes.map(function(p, i) { return cmpPaneHtml(p, i, q, commonOnly, presence); }).join('');
 }
 
+function cmpPaneLabel(p) {
+    if (p.all) { var a = areaById(p.areaId); return a ? a.name + ' (all)' : 'Area'; }
+    var l = locById(p.locId); return l ? l.code : '';
+}
+
+/* option labels with a "has medicines" indicator (options can't hold HTML, so plain text) */
+function areaOptLabel(a) {
+    var sh = shelvesIn(a), used = sh.filter(function(l) { return l.count > 0; }).length;
+    return (used ? '● ' : '○ ') + a.name + ' · ' +
+           (sh.length ? used + '/' + sh.length + ' in use' : 'no locations');
+}
+function locOptLabel(l) {
+    var t = (l.count ? '● ' : '○ ') + l.code;
+    if (l.name && l.name !== l.code) t += ' — ' + l.name;
+    t += ' · ' + (l.count ? l.count + ' med' + (l.count === 1 ? '' : 's') : 'empty');
+    if (l.supply_office) t += ' · Supply Office';
+    if (l.locked)        t += ' · 🔒 locked';
+    if (l.expiring)      t += ' · ⏳ ' + l.expiring;
+    return t;
+}
+
 function cmpPaneHtml(p, i, q, commonOnly, presence) {
     var areaOpts = PLAN.map(function(a) {
-        return '<option value="' + a.id + '"' + (a.id === p.areaId ? ' selected' : '') + '>' + esc(a.name) + '</option>';
+    var used = shelvesIn(a).some(function(l) { return l.count > 0; });
+        return '<option value="' + a.id + '"' + (a.id === p.areaId ? ' selected' : '') +
+               ' style="color:' + (used ? '#0f766e' : '#94a3b8') + '">' + esc(areaOptLabel(a)) + '</option>';
     }).join('');
     var area = areaById(p.areaId);
     var locOpts = '<option value="">Select location…</option>' + (area ? shelvesIn(area) : []).map(function(l) {
-        return '<option value="' + l.id + '"' + (l.id === p.locId ? ' selected' : '') + '>' + esc(l.code) +
-               (l.name && l.name !== l.code ? ' — ' + esc(l.name) : '') + (l.supply_office ? ' — Supply Office' : '') + (l.locked ? ' (locked)' : '') + '</option>';
+        return '<option value="' + l.id + '"' + (l.id === p.locId ? ' selected' : '') +
+               ' style="color:' + (l.count ? '#0f766e' : '#94a3b8') + '">' + esc(locOptLabel(l)) + '</option>';
     }).join('');
     var head = '<div class="cmp-pane-head"><select class="form-control" onchange="cmpSetArea(' + i + ',this.value)">' + areaOpts + '</select>' +
-               '<select class="form-control" onchange="cmpSetLoc(' + i + ',this.value)">' + locOpts + '</select>' +
-               (cmp.panes.length > 2 ? '<button type="button" class="btn-icon delete sm" title="Remove pane" onclick="cmpRemovePane(' + i + ')"><i class="fas fa-xmark"></i></button>' : '') + '</div>';
+               '<select class="form-control"' + (p.all ? ' disabled' : '') + ' onchange="cmpSetLoc(' + i + ',this.value)">' + locOpts + '</select>' +
+               (cmp.panes.length > 2 ? '<button type="button" class="btn-icon delete sm" title="Remove pane" onclick="cmpRemovePane(' + i + ')"><i class="fas fa-xmark"></i></button>' : '') + '</div>' +
+               '<label class="cmp-allrow"><input type="checkbox"' + (p.all ? ' checked' : '') + ' onchange="cmpSetAll(' + i + ',this.checked)"> Show all medicines in this area</label>';
 
-    var l = p.locId ? locById(p.locId) : null, d = p.locId ? cmp.cache[p.locId] : null, body;
-    if (!l) {
-        body = '<div class="cmp-empty"><i class="fas fa-table-columns" style="display:block;font-size:28px;margin-bottom:8px;color:#d1d9e0"></i>Choose an area and a location.</div>';
+    var l = (!p.all && p.locId) ? locById(p.locId) : null, d = cmpData(p), body;
+    if (!p.all && !l) {
+        body = '<div class="cmp-empty"><i class="fas fa-table-columns" style="display:block;font-size:28px;margin-bottom:8px;color:#d1d9e0"></i>Choose a location, or tick “Show all medicines in this area”.</div>';
     } else if (!d || d.loading) {
         body = '<div class="cmp-empty"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
     } else if (d.error) {
-        body = '<div class="cmp-empty"><i class="fas fa-triangle-exclamation"></i> Could not load this location.</div>';
+        body = '<div class="cmp-empty"><i class="fas fa-triangle-exclamation"></i> Could not load this ' + (p.all ? 'area' : 'location') + '.</div>';
     } else {
         var meds = d.medicines || [], units = 0;
         meds.forEach(function(m) { units += Number(m.qty) || 0; });
@@ -1527,25 +1574,39 @@ function cmpPaneHtml(p, i, q, commonOnly, presence) {
             if (commonOnly && (presence[m.id] || []).length < 2) return false;
             return true;
         });
-        body = (l.locked ? '<div class="lock-banner" style="margin-bottom:10px"><i class="fas fa-lock"></i><div><strong>Locked — ' + esc(l.lock_reason) + '</strong>' +
+        body = (l && l.locked ? '<div class="lock-banner" style="margin-bottom:10px"><i class="fas fa-lock"></i><div><strong>Locked — ' + esc(l.lock_reason) + '</strong>' +
                            '<div class="lock-meta">' + (l.locked_by ? esc(l.locked_by) : '') + (l.locked_at ? ' · ' + esc(l.locked_at) : '') + '</div></div></div>' : '') +
                '<div class="meds-summary" style="margin-bottom:10px"><div class="sum-chip"><strong>' + meds.length + '</strong> medicine' + (meds.length === 1 ? '' : 's') + '</div>' +
-               '<div class="sum-chip"><strong>' + units + '</strong> units</div></div>';
+               '<div class="sum-chip"><strong>' + units + '</strong> units</div>' +
+               (p.all ? '<div class="sum-chip"><strong>' + (d.location_count || 0) + '</strong> location' + (d.location_count === 1 ? '' : 's') + '</div>' : '') + '</div>';
         if (!rows.length) {
             body += '<div class="cmp-empty"><i class="fas fa-pills"></i> ' + (meds.length ? 'No medicines match.' : 'Nothing stored here.') + '</div>';
         } else {
             body += '<table class="data-table"><thead><tr><th>Medicine</th><th>Stored</th><th>Expiry</th></tr></thead><tbody>' + rows.map(function(m) {
                 var others = (presence[m.id] || []).filter(function(j) { return j !== i; });
                 var also = others.map(function(j) {
-                    var o = cmp.panes[j], od = cmp.cache[o.locId], ol = locById(o.locId), q2 = 0;
+                    var o = cmp.panes[j], od = cmpData(o), q2 = 0;
                     (od.medicines || []).forEach(function(x) { if (x.id === m.id) q2 = x.qty; });
-                    return '<span class="cmp-also" title="Also stored in ' + esc(ol.code) + '"><i class="fas fa-link" style="font-size:8px"></i> ' + esc(ol.code) + ' · ' + esc(q2) + '</span>';
+                    var lbl = cmpPaneLabel(o);
+                    return '<span class="cmp-also" title="Also stored in ' + esc(lbl) + '"><i class="fas fa-link" style="font-size:8px"></i> ' + esc(lbl) + ' · ' + esc(q2) + '</span>';
                 }).join('');
-                var color = l.locked ? '#475569' : (m.status === 'out' ? '#dc2626' : (m.status === 'low' ? '#d97706' : '#16a34a'));
+
+                // where this medicine sits (area mode only)
+                var where = '';
+                if (p.all) {
+                    where = '<div class="cmp-locs">' + (m.locs || []).map(function(lc) {
+                        return '<span class="cmp-loc' + (lc.locked ? ' lock' : '') + (lc.supply_office ? ' so' : '') + '" title="' + esc(lc.name || lc.code) + '">' +
+                               '<i class="fas fa-' + (lc.locked ? 'lock' : (lc.supply_office ? 'building' : 'location-dot')) + '" style="font-size:8px"></i> ' +
+                               esc(lc.code) + ' · ' + esc(lc.qty) + '</span>';
+                    }).join('') + '</div>';
+                }
+
+                var allLocked = p.all ? (m.locs || []).length > 0 && (m.locs || []).every(function(lc) { return lc.locked; }) : !!(l && l.locked);
+                var color = allLocked ? '#475569' : (m.status === 'out' ? '#dc2626' : (m.status === 'low' ? '#d97706' : '#16a34a'));
                 var dnr = (Number(m.qty) || 0) - (Number(m.rel != null ? m.rel : m.qty) || 0);
                 return '<tr class="' + (others.length ? 'cmp-row-common' : '') + '"><td><div class="med-name">' + esc(m.name) +
                        (m.s2 ? '<span class="s2-chip">S2</span>' : '') + '</div>' +
-                       '<div class="med-sub">' + esc([m.strength, m.form].filter(Boolean).join(' · ')) + '</div>' + (also ? '<div>' + also + '</div>' : '') + '</td>' +
+                       '<div class="med-sub">' + esc([m.strength, m.form].filter(Boolean).join(' · ')) + '</div>' + where + (also ? '<div>' + also + '</div>' : '') + '</td>' +
                        '<td><span style="font-weight:700;color:' + color + '">' + esc(m.qty) + '</span>' + (dnr > 0 ? '<div class="med-sub">' + dnr + ' on hold</div>' : '') + '</td>' +
                        '<td>' + cmpExpiry(m) + '</td></tr>';
             }).join('') + '</tbody></table>';

@@ -71,7 +71,7 @@ urlpatterns = [
     path('storage/transfer/', views.storage_location_transfer, name='storage_location_transfer'),
     path('storage/locations/<int:pk>/lock/', views.storage_location_lock, name='storage_location_lock'),
     path('storage/location/<int:pk>/stock-in/', views.storage_location_stock_in, name='storage_location_stock_in'),
-
+    path('storage/area/<int:pk>/medicines/', views.storage_area_medicines, name='storage_area_medicines'),
 
     # ── Returns ───────────────────────────────────────────────────────────────
     path('returns/',                              views.returns_view,            name='returns'),
