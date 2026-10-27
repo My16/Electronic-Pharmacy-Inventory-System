@@ -150,10 +150,11 @@ def _format_requisition(seq, ward, year):
 
 
 def _next_requisition(ward, year, half):
-    """Continues from the most recent In Patient requisition for this ward/period,
-    so an admin override moves the counter."""
+    """One running number for ALL wards, restarting each half-year.
+    Continues from the most recent In Patient requisition in this period,
+    so an admin override still moves the counter."""
     last = (Dispensing.objects
-            .filter(patient_type='in', ward=ward, requisition_year=year,
+            .filter(patient_type='in', requisition_year=year,
                     requisition_half=half, requisition_seq__isnull=False)
             .order_by('-id')
             .values_list('requisition_seq', flat=True).first() or 0)
@@ -373,6 +374,7 @@ def inventory_view(request):
     dosage_filter = request.GET.get('dosage', '')
     highlight_pk  = request.GET.get('highlight', '')
     per_page      = request.GET.get('per_page', '15')
+    view_mode = 'group' if request.GET.get('view') == 'group' else 'list'
     try:
         per_page = int(per_page)
         if per_page not in [10, 15, 25, 50, 100]:
@@ -417,28 +419,67 @@ def inventory_view(request):
         elif status_filter == 'supply_office':
             medicines_qs = [m for m in all_meds if _held_split(m)[1] > 0]
 
-    if highlight_pk:
-        try:
-            highlighted  = [m for m in medicines_qs if str(m.pk) == str(highlight_pk)]
-            rest         = [m for m in medicines_qs if str(m.pk) != str(highlight_pk)]
-            medicines_qs = highlighted + rest
-        except Exception:
-            pass
+    if view_mode == 'list' and highlight_pk:
+        highlighted  = [m for m in medicines_qs if str(m.pk) == str(highlight_pk)]
+        rest         = [m for m in medicines_qs if str(m.pk) != str(highlight_pk)]
+        medicines_qs = highlighted + rest
 
-    paginator   = Paginator(medicines_qs, per_page)
+    if view_mode == 'group':
+        buckets = {}
+        for m in medicines_qs:
+            buckets.setdefault(m.stock_code_id, []).append(m)
+        groups = []
+        for sc_id, items in buckets.items():
+            sc = items[0].stock_code
+            items.sort(key=lambda x: (x.sub_code or '~', x.medicine_name.lower()))
+            groups.append({
+                'id':     sc_id or 0,
+                'code':   sc.code if sc else '',
+                'name':   sc.generic_name if sc else 'No Stock Code assigned',
+                'items':  items,
+                'has_hl': bool(highlight_pk) and any(str(x.pk) == str(highlight_pk) for x in items),
+            })
+        groups.sort(key=lambda g: (not g['has_hl'], g['id'] == 0, g['code']))
+        paginator = Paginator(groups, per_page)
+    else:
+        paginator = Paginator(medicines_qs, per_page)
+
     page_number = request.GET.get('page', 1)
     try:
         page_obj = paginator.page(page_number)
     except (EmptyPage, PageNotAnInteger):
         page_obj = paginator.page(1)
 
-    rows = list(page_obj.object_list)
+    if view_mode == 'group':
+        page_groups = list(page_obj.object_list)
+        rows = [m for g in page_groups for m in g['items']]
+    else:
+        page_groups = []
+        rows = list(page_obj.object_list)
+
     _attach_locations(rows)
     for m in rows:
-        held = [b for b in m.batches.all() if b.do_not_release and b.quantity > 0]   # already prefetched
+        held = [b for b in m.batches.all() if b.do_not_release and b.quantity > 0]
         m.dnr_qty   = sum(b.quantity for b in held)
         m.locked_qty, m.so_qty = _held_split(m)
         m.dnr_count = len(held)
+
+    if view_mode == 'group':
+        expand_all = bool(search or category_id or status_filter or dosage_filter)
+        for g in page_groups:
+            g['count']  = len(g['items'])
+            g['low']    = sum(1 for m in g['items'] if m.is_low_stock)
+            g['out']    = sum(1 for m in g['items'] if m.is_out_of_stock)
+            g['dnr']    = sum(m.dnr_qty for m in g['items'])
+            g['locked'] = sum(m.locked_qty for m in g['items'])
+            g['so']     = sum(m.so_qty for m in g['items'])
+            g['s2']     = any(m.is_s2_regulated for m in g['items'])
+            g['open']   = expand_all or g['has_hl']
+            for i, m in enumerate(g['items']):
+                m.idx         = i + 1
+                m.grp_id      = g['id']
+                m.grp_open    = g['open']
+                m.group_start = g if i == 0 else None
 
     # Alert panel items
     all_active = list(
@@ -488,6 +529,7 @@ def inventory_view(request):
         'today': today,
         'can_manage': can(request.user, 'inventory', 'edit'),
         'can_admin':  is_admin(request.user),
+        'view_mode': view_mode,
     }
     return render(request, 'inventory.html', context)
 
@@ -2777,10 +2819,21 @@ def consumption_report(request):
 # ─────────────────────────────────────────────────────────────────────────────
 
 REGISTER_UNITS = {
-    'injection': 'AMP.', 'tablet': 'TAB.', 'capsule': 'CAP.', 'syrup': 'BTL.',
-    'suspension': 'BTL.', 'drops': 'BTL.', 'cream': 'TUBE', 'ointment': 'TUBE',
-    'inhaler': 'PC.', 'patch': 'PC.', 'suppository': 'PC.', 'powder': 'SACHET',
+    'tablet': 'TAB.', 'effervescent_tablet': 'TAB.', 'capsule': 'CAP.',
+    'syrup': 'BTL.', 'suspension': 'BTL.', 'drops': 'BTL.',
+    'vial': 'VIAL', 'ampule': 'AMP.', 'prefilled_syringe': 'SYR.', 'nebule': 'NEB.',
+    'sachet': 'SACHET', 'cream': 'TUBE', 'ointment': 'TUBE',
+    'inhaler': 'PC.', 'patch': 'PC.', 'suppository': 'PC.',
 }
+
+STOCK_CARD_UNITS = {
+    'tablet': 'tablet', 'effervescent_tablet': 'tablet', 'capsule': 'capsule',
+    'syrup': 'bottle', 'suspension': 'bottle', 'drops': 'bottle',
+    'vial': 'vial', 'ampule': 'ampule', 'prefilled_syringe': 'syringe', 'nebule': 'nebule',
+    'sachet': 'sachet', 'cream': 'tube', 'ointment': 'tube',
+    'inhaler': 'piece', 'patch': 'piece', 'suppository': 'piece',
+}
+
 REGISTER_MOVE_LABELS = {
     'in': 'RECEIVED', 'return': 'RETURNED', 'adjust': 'ADJUSTMENT',
     'audit': 'AUDIT ADJ.', 'out': 'STOCK OUT', 'expired': 'EXPIRED', 'damaged': 'DAMAGED',
@@ -2909,16 +2962,352 @@ def _pdea_register_build(med, date_from, date_to, rows_per_page, start_page):
     }
 
 
+PDEA_FORM_CHOICES = (
+    ('summary',  'PDEA Report Form 1-14'),
+    ('register', 'PDEA S Register 2-14'),
+)
+PDEA_SUMMARY_ROWS_OPTIONS = (6, 8, 10, 12, 15)
+ 
+# Defaults printed on Form 1-14. Every one can be edited on the page before generating.
+# (Move these to settings.py / a model later if you prefer.)
+PDEA_COMPANY_DEFAULTS = {
+    'company':     'MAYOR HILARION A. RAMIRO SR. MEDICAL CENTER',
+    'address':     'MINDOG, MANINGCOL, OZAMIZ CITY',
+    'contact':     '088-521-0440 / 088-521-0022',
+    'license_no':  'S3H006470001GR051927-K',
+    'valid_until': '05/19/2027',
+    'noted_by':    'JENNIFER LYNN C. URBIZTONDO, MD, FPAFP, MBA-HHA',
+}
+ 
+PDEA_SUMMARY_NOTE = (
+    'Note: Fill-out all columns. Indicate n/a if not applicable. Indicate nothing follows after '
+    'the last drug entry. Summary Report ( January to June or July to December ) and Register are '
+    'to be submitted and presented, respectively, not later than 15 days after the covered period. '
+    'Late submission shall be accompanied by an affidavit stating circumstances of the delay. '
+    'If report covers more than 1 page, sign all pages.'
+)
+ 
+ 
+def _pdea_period_label(d1, d2):
+    if (d1.year, d1.month) == (d2.year, d2.month):
+        s = f'{d1:%B} {d1.year}'
+    elif d1.year == d2.year:
+        s = f'{d1:%B} to {d2:%B} {d1.year}'
+    else:
+        s = f'{d1:%B %Y} to {d2:%B %Y}'
+    return s.upper()
+ 
+ 
+def _pdea_qty_str(v, unit):
+    return '0' if not v else f'{v:,} {unit}'
+ 
+ 
+def _pdea_summary_build(meds, date_from, date_to, rows_per_page):
+    """
+    One row per S2 medicine:
+      Beginning balance + Purchased + Others received - Sold/Used - Others disposed = End balance
+    Uses the same stock ledger as the S Register, so both forms always agree.
+    """
+    start_dt = timezone.make_aware(datetime.combine(date_from, datetime.min.time()))
+    end_dt   = timezone.make_aware(datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+ 
+    rows = []
+    for med in meds:
+        unit = REGISTER_UNITS.get(med.dosage_form, 'PC.')
+        prev = (StockMovement.objects.filter(medicine=med, created_at__lt=start_dt)
+                .order_by('-created_at', '-id').first())
+        opening = prev.quantity_after if prev else 0
+ 
+        moves = (StockMovement.objects
+                 .filter(medicine=med, created_at__gte=start_dt, created_at__lt=end_dt)
+                 .exclude(movement_type__in=('transfer', 'so_in'))
+                 .select_related('supplier'))
+ 
+        purchased = other_in = sold = other_out = 0
+        suppliers = []
+        for m in moves:
+            q = m.quantity
+            if not q:
+                continue
+            if q > 0:
+                if m.movement_type == 'in':
+                    purchased += q
+                    if m.supplier:
+                        nm = m.supplier.name.upper()
+                        if nm not in suppliers:
+                            suppliers.append(nm)
+                else:                               # returns, positive adjustments / audits
+                    other_in += q
+            else:
+                if m.movement_type == 'out' and m.reference_no.startswith('TXN-'):
+                    sold += -q                      # dispensed / used
+                else:                               # expired, damaged, manual out, negative adjustments
+                    other_out += -q
+ 
+        closing = opening + purchased + other_in - sold - other_out
+        if not suppliers:
+            suppliers = [med.supplier.name.upper()] if med.supplier_id else ['N/A']
+ 
+        rows.append({
+            'name':      f'{med.generic_name.upper()} {med.strength.upper()} {unit}'.strip(),
+            's_open':    _pdea_qty_str(opening, unit),
+            's_purch':   _pdea_qty_str(purchased, unit),
+            's_oin':     _pdea_qty_str(other_in, unit),
+            'suppliers': suppliers,
+            's_sold':    _pdea_qty_str(sold, unit),
+            's_oout':    _pdea_qty_str(other_out, unit),
+            's_close':   _pdea_qty_str(closing, unit),
+            'remarks':   'N/A',
+        })
+ 
+    chunks = [rows[i:i + rows_per_page] for i in range(0, len(rows), rows_per_page)] or [[]]
+    pages = [{'number': n, 'total': len(chunks), 'rows': ch} for n, ch in enumerate(chunks, 1)]
+    return {'rows': rows, 'pages': pages}
+ 
+ 
+# ── Form 1-14 : PDF ──────────────────────────────────────────────────────────
+def _pdea_summary_export_pdf(ctx):
+    from reportlab.platypus import PageBreak
+    s, co = ctx['summary'], ctx['company']
+ 
+    page_sz = landscape((8.5 * inch, 13 * inch))
+    margin  = 0.4 * inch
+    avail_w = page_sz[0] - 2 * margin
+    black   = colors.black
+ 
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=page_sz, leftMargin=margin, rightMargin=margin,
+                            topMargin=margin, bottomMargin=margin,
+                            title='PDEA Report Form 1-14', author='MHARSMC ePIS')
+ 
+    ss    = getSampleStyleSheet()
+    base  = ParagraphStyle('f',  parent=ss['Normal'], fontName='Helvetica', fontSize=8.5, leading=10.5)
+    left  = base
+    right = ParagraphStyle('fr', parent=base, alignment=TA_RIGHT)
+    ctr   = ParagraphStyle('fc', parent=base, alignment=TA_CENTER)
+    ctrb  = ParagraphStyle('fcb', parent=ctr, fontName='Helvetica-Bold')
+    head  = ParagraphStyle('fh', parent=ctrb, fontSize=8, leading=9.5)
+    title = ParagraphStyle('ft', parent=ctr, fontSize=10, leading=12.5)
+    cap   = ParagraphStyle('fk', parent=ctr, fontSize=7.5, leading=9)
+    note  = ParagraphStyle('fn', parent=base, fontSize=8.5, leading=10.5)
+    sign  = ParagraphStyle('fs', parent=ctrb, fontSize=10, leading=12)
+ 
+    def P(text, st=ctr):
+        return Paragraph(_xml_escape(str(text)).replace('\n', '<br/>'), st)
+ 
+    def U(label, value):
+        return f'{label} <u>&nbsp;{_xml_escape(value)}&nbsp;</u>'
+ 
+    fr    = [18, 10, 10, 10, 16, 10, 10, 9, 7]
+    col_w = [avail_w * f / 100 for f in fr]
+ 
+    story, first = [], True
+    for pg in s['pages']:
+        if not first:
+            story.append(PageBreak())
+        first = False
+ 
+        top = Table([[Paragraph('PDEA REPORT Form 1-14', left),
+                      Paragraph(f'Page {pg["number"]} of {pg["total"]}', right)]],
+                    colWidths=[avail_w * 0.6, avail_w * 0.4])
+        top.setStyle(TableStyle([('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0)]))
+        story += [top, Spacer(1, 4),
+                  Paragraph('Summary Report of Transactions on Dangerous and/or Drug Preparations '
+                            'containing Controlled Chemical', title),
+                  Paragraph('( To be submitted by licensed retailers and users of laboratory use / or programs '
+                            'for medical,scientific research or instructional / training purposes)', title),
+                  Paragraph(U('For the period covering', ctx['period_label']), title),
+                  Spacer(1, 8)]
+ 
+        info = Table([[
+            Paragraph(U('Name of Company / Entity:', co['company']) + '<br/>' +
+                      U('Address:', co['address']) + '<br/>' +
+                      U('Contact details ( tel/fax/mail):', co['contact']), left),
+            Paragraph(U('S-License No.:', co['license_no']) + '<br/>' +
+                      U('Valid until:', co['valid_until']), right),
+        ]], colWidths=[avail_w * 0.65, avail_w * 0.35])
+        info.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                                  ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0)]))
+        story += [info, Spacer(1, 8)]
+ 
+        data = [
+            [P('Name of Drug\n( Indicate Dosage\nStrenght and\nForm )', head), P('Beginning\nBalance', head),
+             P('Total Quantity\nReceived', head), '', P('Name of Supplier', head),
+             P('Total Quantity Disposed', head), '', P('End Balance', head), P('Remarks', head)],
+            ['', '', P('Purchased per\nSupplier', head), P('Others( ex.\nReturn stocks\nfrom clients)', head), '',
+             P('Sold/Used', head), P('Others( ex. Surrender\n/ return stocks to\nsupplier / loss,etc.)', head), '', ''],
+        ]
+        for r in pg['rows']:
+            data.append([P(r['name'], left), P(r['s_open']), P(r['s_purch']), P(r['s_oin']),
+                         P('\n'.join(r['suppliers'])), P(r['s_sold']), P(r['s_oout']),
+                         P(r['s_close']), P(r['remarks'])])
+        tbl = Table(data, colWidths=col_w, repeatRows=2)
+        tbl.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.7, black),
+            ('SPAN', (0, 0), (0, 1)), ('SPAN', (1, 0), (1, 1)), ('SPAN', (2, 0), (3, 0)),
+            ('SPAN', (4, 0), (4, 1)), ('SPAN', (5, 0), (6, 0)), ('SPAN', (7, 0), (7, 1)), ('SPAN', (8, 0), (8, 1)),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 4), ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 3), ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+        ]))
+        story += [tbl, Spacer(1, 6), Paragraph(PDEA_SUMMARY_NOTE, note), Spacer(1, 10),
+                  Paragraph(f'CERTIFIED TRUE AND CORRECT. FURTHER CERTIFY THAT AFOREMENTIONED END BALANCE '
+                            f'TALLIES WITH THE ACTUAL INVENTORY AS OF {ctx["date_to"]:%B %d, %Y}.'.upper(), note)]
+ 
+        sig = Table([
+            ['', '', P('Noted by:', left)],
+            [P(ctx['pharmacist'], sign), '', P(co['noted_by'], sign)],
+            [P('Printed Name & Signature of Authorized Pharmacist', cap), '',
+             P('Printed Name & Signature of Owner/President/Head of the Company', cap)],
+        ], colWidths=[avail_w * 0.38, avail_w * 0.24, avail_w * 0.38])
+        sig.setStyle(TableStyle([('LINEBELOW', (0, 1), (0, 1), 0.8, black),
+                                 ('LINEBELOW', (2, 1), (2, 1), 0.8, black),
+                                 ('TOPPADDING', (0, 1), (-1, 1), 16)]))
+        story += [Spacer(1, 6), sig]
+ 
+    doc.build(story)
+    resp = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    resp['Content-Disposition'] = f'attachment; filename="{_pdea_register_filename(ctx, "pdf")}"'
+    return resp
+ 
+ 
+# ── Form 1-14 : Excel ────────────────────────────────────────────────────────
+def _pdea_summary_export_excel(ctx):
+    from openpyxl.worksheet.pagebreak import Break
+    from openpyxl.worksheet.properties import PageSetupProperties
+    s, co = ctx['summary'], ctx['company']
+ 
+    thin   = Side(style='thin', color='000000')
+    box    = Border(left=thin, right=thin, top=thin, bottom=thin)
+    f_norm = Font(name='Arial', size=9)
+    f_bold = Font(name='Arial', size=9, bold=True)
+    f_head = Font(name='Arial', size=9, bold=True)
+    f_sign = Font(name='Arial', size=10, bold=True)
+    f_cap  = Font(name='Arial', size=8)
+    ctr = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    lft = Alignment(horizontal='left',   vertical='center', wrap_text=True)
+    rgt = Alignment(horizontal='right',  vertical='center')
+    widths = [38, 16, 16, 20, 34, 16, 22, 16, 12]
+ 
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Form 1-14'
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.page_setup.orientation = 'landscape'
+    ws.page_setup.paperSize   = 14                  # Folio
+    ws.page_setup.fitToWidth  = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+    ws.page_margins.left = ws.page_margins.right = 0.4
+    ws.page_margins.top  = ws.page_margins.bottom = 0.4
+ 
+    r = 1
+    for pg in s['pages']:
+        _xl_merge(ws, r, 1, r, 5, 'PDEA REPORT Form 1-14', f_bold, lft)
+        _xl_merge(ws, r, 6, r, 9, f'Page {pg["number"]} of {pg["total"]}', f_bold, rgt)
+        r += 1
+        for txt in ('Summary Report of Transactions on Dangerous and/or Drug Preparations containing Controlled Chemical',
+                    '( To be submitted by licensed retailers and users of laboratory use / or programs for '
+                    'medical,scientific research or instructional / training purposes)',
+                    f'For the period covering  {ctx["period_label"]}'):
+            _xl_merge(ws, r, 1, r, 9, txt, f_bold, ctr)
+            r += 1
+        r += 1
+ 
+        _xl_merge(ws, r, 1, r, 5, f'Name of Company / Entity:  {co["company"]}', f_norm, lft)
+        _xl_merge(ws, r, 6, r, 9, f'S-License No.:  {co["license_no"]}', f_norm, rgt); r += 1
+        _xl_merge(ws, r, 1, r, 5, f'Address:  {co["address"]}', f_norm, lft)
+        _xl_merge(ws, r, 6, r, 9, f'Valid until:  {co["valid_until"]}', f_norm, rgt); r += 1
+        _xl_merge(ws, r, 1, r, 5, f'Contact details ( tel/fax/mail):  {co["contact"]}', f_norm, lft); r += 2
+ 
+        # header
+        _xl_merge(ws, r, 1, r + 1, 1, 'Name of Drug\n( Indicate Dosage Strenght and Form )', f_head, ctr, box)
+        _xl_merge(ws, r, 2, r + 1, 2, 'Beginning\nBalance', f_head, ctr, box)
+        _xl_merge(ws, r, 3, r, 4, 'Total Quantity Received', f_head, ctr, box)
+        _xl_merge(ws, r, 5, r + 1, 5, 'Name of Supplier', f_head, ctr, box)
+        _xl_merge(ws, r, 6, r, 7, 'Total Quantity Disposed', f_head, ctr, box)
+        _xl_merge(ws, r, 8, r + 1, 8, 'End Balance', f_head, ctr, box)
+        _xl_merge(ws, r, 9, r + 1, 9, 'Remarks', f_head, ctr, box)
+        for c, label in ((3, 'Purchased per\nSupplier'), (4, 'Others( ex. Return stocks\nfrom clients)'),
+                         (6, 'Sold/Used'), (7, 'Others( ex. Surrender / return\nstocks to supplier / loss,etc.)')):
+            cell = ws.cell(r + 1, c, label)
+            cell.font, cell.alignment, cell.border = f_head, ctr, box
+        ws.row_dimensions[r].height = 22
+        ws.row_dimensions[r + 1].height = 44
+        r += 2
+ 
+        for rw in pg['rows']:
+            vals = [rw['name'], rw['s_open'], rw['s_purch'], rw['s_oin'], '\n'.join(rw['suppliers']),
+                    rw['s_sold'], rw['s_oout'], rw['s_close'], rw['remarks']]
+            lines = 1
+            for i, v in enumerate(vals, 1):
+                c = ws.cell(r, i, v)
+                c.font, c.border = f_norm, box
+                c.alignment = lft if i == 1 else ctr
+                lines = max(lines, _xl_lines(v, widths[i - 1]))
+            ws.row_dimensions[r].height = max(20, 12.5 * lines + 6)
+            r += 1
+ 
+        r += 1
+        _xl_merge(ws, r, 1, r, 9, PDEA_SUMMARY_NOTE, f_norm, lft)
+        ws.row_dimensions[r].height = 40; r += 2
+        _xl_merge(ws, r, 1, r, 9,
+                  f'CERTIFIED TRUE AND CORRECT. FURTHER CERTIFY THAT AFOREMENTIONED END BALANCE TALLIES WITH '
+                  f'THE ACTUAL INVENTORY AS OF {ctx["date_to"]:%B %d, %Y}.'.upper(), f_bold, lft)
+        ws.row_dimensions[r].height = 28; r += 2
+ 
+        _xl_merge(ws, r, 6, r, 8, 'Noted by:', f_norm, lft); r += 2
+        _xl_merge(ws, r, 1, r, 2, ctx['pharmacist'], f_sign, ctr, Border(bottom=thin))
+        _xl_merge(ws, r, 6, r, 8, co['noted_by'], f_sign, ctr, Border(bottom=thin)); r += 1
+        _xl_merge(ws, r, 1, r, 2, 'Printed Name & Signature of Authorized Pharmacist', f_cap, ctr)
+        _xl_merge(ws, r, 6, r, 8, 'Printed Name & Signature of Owner/President/Head of the Company', f_cap, ctr)
+        ws.row_breaks.append(Break(id=r))
+        r += 3
+ 
+    resp = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    resp['Content-Disposition'] = f'attachment; filename="{_pdea_register_filename(ctx, "xlsx")}"'
+    wb.save(resp)
+    return resp
+
+
 def _pdea_register_context(request):
-    """Filters + registers, shared by the page, the PDF and the Excel export."""
+    """Filters + the chosen PDEA form, shared by the page, the PDF and the Excel export."""
     today   = timezone.localdate()
     s2_meds = Medicine.objects.filter(is_active=True, is_s2_regulated=True).order_by('medicine_name')
-
+ 
+    form_type = request.GET.get('form', 'summary')
+    if form_type not in dict(PDEA_FORM_CHOICES):
+        form_type = 'summary'
+ 
     date_from = _parse_iso(request.GET.get('date_from'), today.replace(day=1))
     date_to   = _parse_iso(request.GET.get('date_to'), today)
     if date_to < date_from:
         date_from, date_to = date_to, date_from
+ 
+    # ── Form 1-14 is a half-yearly report: pick Year + Half ──────────────────
+    if today.month <= 6:                       # default = last completed half
+        def_year, def_half = today.year - 1, 2
+    else:
+        def_year, def_half = today.year, 1
+    try:
+        sum_year = int(request.GET.get('year', def_year))
+    except (TypeError, ValueError):
+        sum_year = def_year
+    if not 2000 <= sum_year <= today.year + 1:
+        sum_year = def_year
+    sum_half = _to_int(request.GET.get('half'))
+    if sum_half not in (1, 2):
+        sum_half = def_half
 
+    if form_type == 'summary':
+        if sum_half == 1:
+            date_from, date_to = date(sum_year, 1, 1), date(sum_year, 6, 30)
+        else:
+            date_from, date_to = date(sum_year, 7, 1), date(sum_year, 12, 31)
+
+    # S Register options
     rows_options = (10, 15, 20, 25, 30)
     try:
         rows_per_page = int(request.GET.get('rows', 15))
@@ -2930,32 +3319,47 @@ def _pdea_register_context(request):
         start_page = max(int(request.GET.get('start_page', 1)), 1)
     except (TypeError, ValueError):
         start_page = 1
-
+ 
+    # Form 1-14 options
+    try:
+        f_rows = int(request.GET.get('f_rows', 10))
+    except (TypeError, ValueError):
+        f_rows = 10
+    if f_rows not in PDEA_SUMMARY_ROWS_OPTIONS:
+        f_rows = 10
+ 
     med_param = request.GET.get('medicine', '').strip()
-    med_id    = _to_int(med_param)
-    single    = s2_meds.filter(pk=med_id).first() if med_id else None
-
+    if form_type == 'summary' and not med_param:
+        med_param = 'all'                       # Form 1-14 lists every S2 drug by default
+    med_id = _to_int(med_param)
+    single = s2_meds.filter(pk=med_id).first() if med_id else None
+ 
     if med_param == 'all':
-        targets = list(s2_meds)
+        targets = list(s2_meds.select_related('supplier'))
     elif single:
         targets = [single]
     else:
-        targets = []          # nothing chosen yet -> empty page
-
-    registers = []
-    for m in targets:
-        reg = _pdea_register_build(m, date_from, date_to, rows_per_page, start_page)
-        if med_param == 'all' and not reg['has_events'] and reg['opening'] == 0:
-            continue
-        registers.append(reg)
-
+        targets = []
+ 
+    registers, summary = [], None
+    if form_type == 'register':
+        for m in targets:
+            reg = _pdea_register_build(m, date_from, date_to, rows_per_page, start_page)
+            if med_param == 'all' and not reg['has_events'] and reg['opening'] == 0:
+                continue
+            registers.append(reg)
+    elif targets:
+        summary = _pdea_summary_build(targets, date_from, date_to, f_rows)
+ 
     if med_param == 'all':
-        selected_label = 'All S2 medicines (one register each)'
+        selected_label = 'All S2 medicines'
     elif single:
         selected_label = f'{single.medicine_name} {single.strength}'
     else:
         selected_label = ''
-
+ 
+    company = {k: (request.GET.get(k, '').strip() or v) for k, v in PDEA_COMPANY_DEFAULTS.items()}
+ 
     return {
         's2_meds': s2_meds, 'registers': registers,
         'selected': single.pk if single else None,
@@ -2966,6 +3370,14 @@ def _pdea_register_context(request):
         'med_param': med_param if (med_param == 'all' or single) else '',
         'selected_label': selected_label,
         'generated': bool(med_param == 'all' or single),
+        # new
+        'form_type': form_type, 'form_choices': PDEA_FORM_CHOICES,
+        'summary': summary, 'f_rows': f_rows, 'f_rows_options': PDEA_SUMMARY_ROWS_OPTIONS,
+        'company': company, 'period_label': _pdea_period_label(date_from, date_to),
+        'summary_note': PDEA_SUMMARY_NOTE,
+        'sum_year': sum_year, 'sum_half': sum_half,
+        'year_choices': list(range(today.year - 3, today.year + 2)),
+        'half_choices': ((1, '1st Half (January – June)'), (2, '2nd Half (July – December)')),
     }
 
 
@@ -2974,7 +3386,11 @@ def pdea_register_report(request):
     return render(request, 'pdea_register.html', _pdea_register_context(request))
 
 
+
 def _pdea_register_filename(ctx, ext):
+    if ctx.get('form_type') == 'summary':
+        half = 'H1' if ctx['date_from'].month == 1 else 'H2'
+        return f"PDEA_Report_Form_1-14_{ctx['date_from'].year}_{half}.{ext}"
     regs = ctx['registers']
     tag  = re.sub(r'[^A-Za-z0-9]+', '_', regs[0]['med'].generic_name).strip('_') \
            if ctx['selected'] and regs else 'ALL'
@@ -2990,6 +3406,13 @@ def pdea_register_export_pdf(request):
     from reportlab.platypus import PageBreak
 
     ctx = _pdea_register_context(request)
+
+    if ctx['form_type'] == 'summary':
+            if not ctx['summary']:
+                messages.error(request, 'No S2 medicines to export for Form 1-14.')
+                return redirect('pdea_register')
+            return _pdea_summary_export_pdf(ctx)
+
     if not ctx['registers']:
         messages.error(request, 'No S2 register data to export for these filters.')
         return redirect('pdea_register')
@@ -3144,6 +3567,13 @@ def pdea_register_export_excel(request):
     from openpyxl.worksheet.properties import PageSetupProperties
 
     ctx = _pdea_register_context(request)
+
+    if ctx['form_type'] == 'summary':
+            if not ctx['summary']:
+                messages.error(request, 'No S2 medicines to export for Form 1-14.')
+                return redirect('pdea_register')
+            return _pdea_summary_export_excel(ctx)
+
     registers = ctx['registers']
     if not registers:
         messages.error(request, 'No S2 register data to export for these filters.')
@@ -3414,9 +3844,9 @@ def dispensing_create(request):
                 return JsonResponse({'error': 'Select In Patient or Out Patient for S2 medicines.'}, status=400)
             if patient_type == 'in':
                 try:
-                    # row lock so two pharmacists can't get the same number
-                    ward = Ward.objects.select_for_update().get(
-                        pk=int(data.get('ward_pk') or 0), is_active=True)
+                    # lock every ward row so the shared counter can't be read twice at once
+                    list(Ward.objects.select_for_update().filter(is_active=True))
+                    ward = Ward.objects.get(pk=int(data.get('ward_pk') or 0), is_active=True)
                 except (Ward.DoesNotExist, ValueError, TypeError):
                     return JsonResponse({'error': 'Select a valid ward for In Patient.'}, status=400)
                 today_local      = timezone.localdate()
@@ -5502,12 +5932,6 @@ def returns_report_data(request):
 
 STOCK_CARD_HOSPITAL     = 'MAYOR HILARION A. RAMIRO, SR. MEDICAL CENTER'
 STOCK_CARD_ROWS_OPTIONS = (25, 30, 35)
-STOCK_CARD_UNITS = {
-    'tablet': 'tablet', 'capsule': 'capsule', 'syrup': 'bottle', 'suspension': 'bottle',
-    'injection': 'ampule/vial', 'cream': 'tube', 'ointment': 'tube', 'drops': 'bottle',
-    'inhaler': 'piece', 'patch': 'piece', 'suppository': 'piece', 'powder': 'sachet',
-    'other': 'piece',
-}
 
 
 def _stock_card_bucket(d):
@@ -5645,21 +6069,40 @@ def _stock_card_context(request):
     if rows_per_page not in STOCK_CARD_ROWS_OPTIONS:
         rows_per_page = 35
 
-    meds      = Medicine.objects.filter(is_active=True).order_by('medicine_name')
-    med_param = request.GET.get('medicine', '')
+    # Ordered by Stock No. (sub_code); medicines without one go last
+    meds = (Medicine.objects.filter(is_active=True)
+            .select_related('stock_code')
+            .order_by(F('sub_code').asc(nulls_last=True), 'medicine_name'))
+    stock_codes = (StockCode.objects.filter(medicines__is_active=True)
+                   .distinct().order_by('code'))
+
+    med_param = request.GET.get('medicine', '').strip()
+    targets, skip_empty = [], False
+
+    if med_param == 'all':                               # every medicine with activity
+        targets, skip_empty = list(meds), True
+    elif med_param.startswith('sc-'):                    # whole Stock Code (all Stock Nos. under it)
+        sc_id = _to_int(med_param[3:])
+        targets = list(meds.filter(stock_code_id=sc_id)) if sc_id else []
+        skip_empty = len(targets) > 1
+    elif med_param:                                      # one Stock No. (pk, or typed sub_code)
+        m = None
+        if _to_int(med_param):
+            m = meds.filter(pk=_to_int(med_param)).first()
+        if not m:
+            m = meds.filter(sub_code__iexact=med_param).first()
+        targets = [m] if m else []
+
     cards = []
-    if med_param == 'all':
-        for m in meds:
-            c = _stock_card_build(m, date_from, date_to, rows_per_page)
-            if c['has_events'] or c['opening']:
-                cards.append(c)
-    elif _to_int(med_param):
-        m = meds.filter(pk=_to_int(med_param)).first()
-        if m:
-            cards.append(_stock_card_build(m, date_from, date_to, rows_per_page))
+    for m in targets:
+        c = _stock_card_build(m, date_from, date_to, rows_per_page)
+        if skip_empty and not (c['has_events'] or c['opening']):
+            continue
+        cards.append(c)
 
     return {
-        'medicines': meds, 'cards': cards, 'med_param': med_param,
+        'medicines': meds, 'stock_codes': stock_codes,
+        'cards': cards, 'med_param': med_param,
         'date_from': date_from, 'date_to': date_to,
         'rows_per_page': rows_per_page, 'rows_options': STOCK_CARD_ROWS_OPTIONS,
         'hospital_name': STOCK_CARD_HOSPITAL,

@@ -63,7 +63,7 @@ class UserPermission(models.Model):
         ("reports",            "Reports & Analytics"),
         ("consumption_report", "Consumption Report"),
         ("returns",            "Returns Management"),
-        ("pdea_register",      "PDEA S2 Register"),
+        ("pdea_register",      "PDEA Report"),
         ("stock_card",         "Stock Card"),
         ("supplies_ledger",    "Supplies Ledger"),
     ]
@@ -381,19 +381,22 @@ class StockCode(models.Model):
 class Medicine(models.Model):
 
     DOSAGE_FORM_CHOICES = [
-        ('tablet',      'Tablet'),
-        ('capsule',     'Capsule'),
-        ('syrup',       'Syrup'),
-        ('suspension',  'Suspension'),
-        ('injection',   'Injection'),
-        ('cream',       'Cream'),
-        ('ointment',    'Ointment'),
-        ('drops',       'Drops'),
-        ('inhaler',     'Inhaler'),
-        ('patch',       'Patch'),
-        ('suppository', 'Suppository'),
-        ('powder',      'Powder'),
-        ('other',       'Other'),
+        ('tablet',              'Tablet'),
+        ('effervescent_tablet', 'Effervescent Tablet'),
+        ('capsule',             'Capsule'),
+        ('syrup',               'Syrup'),
+        ('suspension',          'Suspension'),
+        ('vial',                'Vial'),
+        ('ampule',              'Ampule'),
+        ('prefilled_syringe',   'Pre-filled Syringe'),
+        ('nebule',              'Nebule'),
+        ('sachet',              'Sachet'),
+        ('cream',               'Cream'),
+        ('ointment',            'Ointment'),
+        ('drops',               'Drops'),
+        ('inhaler',             'Inhaler'),
+        ('patch',               'Patch'),
+        ('suppository',         'Suppository'),
     ]
 
     medicine_name    = models.CharField(max_length=200)

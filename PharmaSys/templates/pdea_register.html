@@ -1,9 +1,9 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}ePIS — PDEA S2 Register{% endblock %}
-{% block page_title %}PDEA S2 Register{% endblock %}
-{% block breadcrumb %}PDEA S2 Register{% endblock %}
+{% block title %}ePIS — PDEA Report{% endblock %}
+{% block page_title %}PDEA Report{% endblock %}
+{% block breadcrumb %}PDEA Report{% endblock %}
 {% block nav_pdea_register %}active{% endblock %}
 
 {% block extra_css %}
@@ -29,6 +29,12 @@
     .reg-summary-table th { background:#f8fafc; color:#78909c; text-align:left; padding:6px 10px; font-size:11px; }
     .reg-summary-table td { padding:6px 10px; border-top:1px solid #f0f4f8; }
 
+    /* form picker + company details */
+    .form-pick select { font-weight:600; border-color:#00ADB5; min-width:230px; }
+    .co-details { width:100%; font-size:12px; color:#64748b; }
+    .co-details summary { cursor:pointer; font-weight:600; font-size:11.5px; }
+    .co-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:10px; margin-top:10px; }
+
     /* ── The register sheet ── */
     .reg-sheet { background:#fff; color:#000; font-family:Arial, Helvetica, sans-serif; border:1px solid #cfd8dc; box-shadow:0 2px 12px rgba(0,0,0,.08); padding:18px 20px; margin-bottom:18px; overflow-x:auto; }
     .reg-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; }
@@ -52,6 +58,22 @@
     .reg-sign { margin-top:18px; text-align:center; }
     .reg-sign-name { display:inline-block; min-width:300px; border-bottom:1px solid #000; padding:0 20px 2px; font-size:13px; font-weight:700; }
     .reg-sign-cap { font-size:11px; margin-top:3px; }
+
+    /* ── Form 1-14 sheet ── */
+    .f-top { display:flex; justify-content:space-between; font-size:12px; }
+    .f-title { text-align:center; font-size:12.5px; line-height:1.45; margin:6px 0 10px; }
+    .f-title u { font-weight:600; }
+    .f-info { display:flex; justify-content:space-between; gap:20px; font-size:12px; line-height:1.7; margin-bottom:10px; }
+    .f-info .r { text-align:right; }
+    .f-table th { font-size:10.5px; }
+    .f-table td { font-size:11px; padding:5px 6px; }
+    .f-table td.l { text-align:left; font-weight:600; }
+    .f-note { font-size:11.5px; margin-top:8px; line-height:1.4; }
+    .f-cert { font-size:12px; font-weight:600; margin-top:10px; text-transform:uppercase; }
+    .f-sign { display:grid; grid-template-columns:1fr 1fr; gap:60px; margin-top:34px; }
+    .f-sign .nb { font-size:12px; margin-bottom:22px; min-height:16px; }
+    .f-sign .nm { border-bottom:1px solid #000; text-align:center; font-weight:700; font-size:13px; padding-bottom:2px; }
+    .f-sign .cp { text-align:center; font-size:10.5px; margin-top:3px; }
 
     /* ── searchable medicine box ── */
     .sc-combo{position:relative;width:320px}
@@ -81,6 +103,16 @@
 
 <div class="reg-toolbar no-print">
     <form method="GET" action="{% url 'pdea_register' %}" class="reg-filters">
+
+        <div class="reg-field form-pick">
+            <label>Form to generate</label>
+            <select name="form" id="formType">
+                {% for val, label in form_choices %}
+                <option value="{{ val }}" {% if val == form_type %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
         <div class="reg-field">
             <label>Medicine (S2) <span style="font-weight:400">(type to search)</span></label>
             <div class="sc-combo" id="medCombo">
@@ -88,7 +120,7 @@
                 <i class="fas fa-chevron-down caret"></i>
                 <input type="hidden" name="medicine" id="medValue" value="{{ med_param }}">
                 <div class="sc-combo-list" id="medList">
-                    <div class="sc-opt" data-value="all">All S2 medicines (one register each)</div>
+                    <div class="sc-opt" data-value="all">All S2 medicines</div>
                     {% for m in s2_meds %}
                     <div class="sc-opt" data-value="{{ m.pk }}">{{ m.medicine_name }} {{ m.strength }}</div>
                     {% endfor %}
@@ -96,30 +128,67 @@
                 </div>
             </div>
         </div>
-        <div class="reg-field">
+        <div class="reg-field only-register">
             <label>From</label>
             <input type="date" name="date_from" value="{{ date_from|date:'Y-m-d' }}">
         </div>
-        <div class="reg-field">
+        <div class="reg-field only-register">
             <label>To</label>
             <input type="date" name="date_to" value="{{ date_to|date:'Y-m-d' }}">
         </div>
-        <div class="reg-field">
+
+        <div class="reg-field only-summary">
+            <label>Year</label>
+            <select name="year">
+                {% for y in year_choices %}<option value="{{ y }}" {% if y == sum_year %}selected{% endif %}>{{ y }}</option>{% endfor %}
+            </select>
+        </div>
+        <div class="reg-field only-summary">
+            <label>Report period</label>
+            <select name="half">
+                {% for v, label in half_choices %}<option value="{{ v }}" {% if v == sum_half %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+        </div>
+
+        {# S Register only #}
+        <div class="reg-field only-register">
             <label>Rows / page</label>
             <select name="rows">
                 {% for r in rows_options %}<option value="{{ r }}" {% if r == rows_per_page %}selected{% endif %}>{{ r }}</option>{% endfor %}
             </select>
         </div>
-        <div class="reg-field" style="width:90px;">
+        <div class="reg-field only-register" style="width:90px;">
             <label>Start page</label>
             <input type="number" name="start_page" min="1" value="{{ start_page }}">
         </div>
+
+        {# Form 1-14 only #}
+        <div class="reg-field only-summary">
+            <label>Drugs / page</label>
+            <select name="f_rows">
+                {% for r in f_rows_options %}<option value="{{ r }}" {% if r == f_rows %}selected{% endif %}>{{ r }}</option>{% endfor %}
+            </select>
+        </div>
+
         <div class="reg-field" style="min-width:230px;">
             <label>Authorized pharmacist</label>
             <input type="text" name="pharmacist" value="{{ pharmacist }}">
         </div>
+
+        <details class="co-details only-summary">
+            <summary>Company details &amp; “Noted by” (printed on Form 1-14)</summary>
+            <div class="co-grid">
+                <div class="reg-field"><label>Name of Company / Entity</label><input type="text" name="company" value="{{ company.company }}"></div>
+                <div class="reg-field"><label>Address</label><input type="text" name="address" value="{{ company.address }}"></div>
+                <div class="reg-field"><label>Contact details</label><input type="text" name="contact" value="{{ company.contact }}"></div>
+                <div class="reg-field"><label>S-License No.</label><input type="text" name="license_no" value="{{ company.license_no }}"></div>
+                <div class="reg-field"><label>Valid until</label><input type="text" name="valid_until" value="{{ company.valid_until }}"></div>
+                <div class="reg-field"><label>Noted by (Owner / President / Head)</label><input type="text" name="noted_by" value="{{ company.noted_by }}"></div>
+            </div>
+        </details>
+
         <button type="submit" class="btn-gen"><i class="fas fa-rotate"></i> Generate</button>
-        {% if registers %}
+        {% if registers or summary %}
         <button type="button" class="btn-prn" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
         <button type="submit" formaction="{% url 'pdea_register_export_pdf' %}" class="btn-prn" style="background:#dc2626;">
             <i class="fas fa-file-pdf"></i> PDF
@@ -156,20 +225,107 @@
         </tbody>
     </table>
     <div class="reg-hint">Each medicine prints on its own pages. For best results print on Folio / Long (13 × 8.5 in) landscape with margins set to Default and "Background graphics" off.</div>
+    {% elif summary %}
+    <div class="reg-hint">Form 1-14 covers a six-month period ({{ period_label }}) and lists every selected S2 drug on one summary table ({{ summary.rows|length }} drug{{ summary.rows|length|pluralize }}, {{ summary.pages|length }} page{{ summary.pages|length|pluralize }}). End balance = Beginning + Purchased + Others received − Sold/Used − Others disposed. Print on Folio / Long (13 × 8.5 in) landscape.</div>
     {% endif %}
 </div>
 
-{% if not registers %}
+{% if not registers and not summary %}
 <div class="reg-empty">
     <i class="fas fa-book-medical" style="font-size:34px;display:block;margin-bottom:10px;color:#d1d9e0;"></i>
     {% if not generated %}
-        Select an S2 medicine (or <b>All S2 medicines</b>) and click <b>Generate</b>.
+        Choose the <b>form</b>, select an S2 medicine (or <b>All S2 medicines</b>) and click <b>Generate</b>.
     {% else %}
-        No S2 register data found. Mark a medicine as <b>S2 Regulated</b> in Inventory, or widen the date range.
+        No S2 data found. Mark a medicine as <b>S2 Regulated</b> in Inventory, or widen the date range.
     {% endif %}
 </div>
-{% else %}
 
+{% elif summary %}
+{# ═════════════════ PDEA REPORT FORM 1-14 ═════════════════ #}
+{% for pg in summary.pages %}
+<div class="reg-sheet">
+    <div class="f-top">
+        <div>PDEA REPORT Form 1-14</div>
+        <div>Page {{ pg.number }} of {{ pg.total }}</div>
+    </div>
+
+    <div class="f-title">
+        Summary Report of Transactions on Dangerous and/or Drug Preparations containing Controlled Chemical<br>
+        ( To be submitted by licensed retailers and users of laboratory use / or programs for medical, scientific research or instructional / training purposes)<br>
+        For the period covering <u>&nbsp;{{ period_label }}&nbsp;</u>
+    </div>
+
+    <div class="f-info">
+        <div>
+            Name of Company / Entity: <u>&nbsp;{{ company.company }}&nbsp;</u><br>
+            Address: <u>&nbsp;{{ company.address }}&nbsp;</u><br>
+            Contact details ( tel/fax/mail): <u>&nbsp;{{ company.contact }}&nbsp;</u>
+        </div>
+        <div class="r">
+            S-License No.: <u>&nbsp;{{ company.license_no }}&nbsp;</u><br>
+            Valid until: <u>&nbsp;{{ company.valid_until }}&nbsp;</u>
+        </div>
+    </div>
+
+    <table class="reg-table f-table">
+        <colgroup>
+            <col style="width:18%"><col style="width:10%"><col style="width:10%"><col style="width:10%">
+            <col style="width:16%"><col style="width:10%"><col style="width:10%"><col style="width:9%"><col style="width:7%">
+        </colgroup>
+        <thead>
+            <tr>
+                <th rowspan="2">Name of Drug<br>( Indicate Dosage<br>Strenght and<br>Form )</th>
+                <th rowspan="2">Beginning<br>Balance</th>
+                <th colspan="2">Total Quantity<br>Received</th>
+                <th rowspan="2">Name of Supplier</th>
+                <th colspan="2">Total Quantity Disposed</th>
+                <th rowspan="2">End Balance</th>
+                <th rowspan="2">Remarks</th>
+            </tr>
+            <tr>
+                <th>Purchased per<br>Supplier</th>
+                <th>Others( ex.<br>Return stocks<br>from clients)</th>
+                <th>Sold/Used</th>
+                <th>Others( ex. Surrender<br>/ return stocks to<br>supplier / loss,etc.)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in pg.rows %}
+            <tr>
+                <td class="l">{{ r.name }}</td>
+                <td class="num">{{ r.s_open }}</td>
+                <td class="num">{{ r.s_purch }}</td>
+                <td class="num">{{ r.s_oin }}</td>
+                <td class="c">{% for ln in r.suppliers %}<div class="ln">{{ ln }}</div>{% endfor %}</td>
+                <td class="num">{{ r.s_sold }}</td>
+                <td class="num">{{ r.s_oout }}</td>
+                <td class="num">{{ r.s_close }}</td>
+                <td class="c">{{ r.remarks }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="f-note">{{ summary_note }}</div>
+    <div class="f-cert">Certified true and correct. Further certify that aforementioned end balance tallies with the actual inventory as of {{ date_to|date:"F d, Y" }}.</div>
+
+    <div class="f-sign">
+        <div>
+            <div class="nb">&nbsp;</div>
+            <div class="nm">{{ pharmacist }}</div>
+            <div class="cp">Printed Name &amp; Signature of Authorized Pharmacist</div>
+        </div>
+        <div>
+            <div class="nb">Noted by:</div>
+            <div class="nm">{{ company.noted_by }}</div>
+            <div class="cp">Printed Name &amp; Signature of Owner/President/Head of the Company</div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+{% else %}
+{# ═════════════════ PDEA S REGISTER 2-14 ═════════════════ #}
 {% for reg in registers %}
 {% with med=reg.med unit=reg.unit %}
 {% for pg in reg.pages %}
@@ -252,71 +408,82 @@
 
 {% endif %}
 
-    {% block extra_js %}
-        <script>
-            (function () {
-            var combo  = document.getElementById('medCombo');
-            var input  = document.getElementById('medSearch');
-            var hidden = document.getElementById('medValue');
-            var opts   = Array.prototype.slice.call(combo.querySelectorAll('.sc-opt'));
-            var none   = document.getElementById('medNone');
-            var chosenLabel = '';
+{% endblock %}
 
-            opts.forEach(function (o) {
-                if (o.dataset.value === hidden.value) { chosenLabel = o.textContent.trim(); }
-            });
-            input.value = chosenLabel;
 
-            function filter() {
-                var q = input.value.trim().toLowerCase(), shown = 0;
-                opts.forEach(function (o) {
-                var ok = !q || o.textContent.toLowerCase().indexOf(q) !== -1;
-                o.classList.toggle('hidden', !ok);
-                o.classList.remove('active');
-                if (ok) shown++;
-                });
-                none.style.display = shown ? 'none' : 'block';
-                var first = opts.filter(function (o) { return !o.classList.contains('hidden'); })[0];
-                if (first && q) first.classList.add('active');
+{% block extra_js %}
+<script>
+(function () {
+    /* ── show only the options that belong to the chosen form ── */
+    var formSel = document.getElementById('formType');
+    function applyForm() {
+        var summary = formSel.value === 'summary';
+        document.querySelectorAll('.only-register').forEach(function (e) { e.style.display = summary ? 'none' : ''; });
+        document.querySelectorAll('.only-summary').forEach(function (e) { e.style.display = summary ? '' : 'none'; });
+    }
+    formSel.addEventListener('change', applyForm);
+    applyForm();
+
+    /* ── searchable medicine box ── */
+    var combo  = document.getElementById('medCombo');
+    var input  = document.getElementById('medSearch');
+    var hidden = document.getElementById('medValue');
+    var opts   = Array.prototype.slice.call(combo.querySelectorAll('.sc-opt'));
+    var none   = document.getElementById('medNone');
+    var chosenLabel = '';
+
+    opts.forEach(function (o) {
+        if (o.dataset.value === hidden.value) { chosenLabel = o.textContent.trim(); }
+    });
+    input.value = chosenLabel;
+
+    function filter() {
+        var q = input.value.trim().toLowerCase(), shown = 0;
+        opts.forEach(function (o) {
+            var ok = !q || o.textContent.toLowerCase().indexOf(q) !== -1;
+            o.classList.toggle('hidden', !ok);
+            o.classList.remove('active');
+            if (ok) shown++;
+        });
+        none.style.display = shown ? 'none' : 'block';
+        var first = opts.filter(function (o) { return !o.classList.contains('hidden'); })[0];
+        if (first && q) first.classList.add('active');
+    }
+    function openList()  { combo.classList.add('open'); }
+    function closeList() { combo.classList.remove('open'); }
+    function pick(o) {
+        hidden.value = o.dataset.value;
+        chosenLabel  = o.textContent.trim();
+        input.value  = chosenLabel;
+        closeList();
+    }
+
+    input.addEventListener('focus', function () {
+        input.select(); opts.forEach(function (o) { o.classList.remove('hidden'); });
+        none.style.display = 'none'; openList();
+    });
+    input.addEventListener('input', function () { openList(); filter(); });
+    input.addEventListener('keydown', function (e) {
+        var vis = opts.filter(function (o) { return !o.classList.contains('hidden'); });
+        var idx = vis.findIndex(function (o) { return o.classList.contains('active'); });
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault(); openList();
+            if (!vis.length) return;
+            if (idx >= 0) vis[idx].classList.remove('active');
+            idx = e.key === 'ArrowDown' ? (idx + 1) % vis.length : (idx - 1 + vis.length) % vis.length;
+            vis[idx].classList.add('active'); vis[idx].scrollIntoView({block: 'nearest'});
+        } else if (e.key === 'Enter') {
+            if (combo.classList.contains('open') && vis.length) {
+                e.preventDefault(); pick(idx >= 0 ? vis[idx] : vis[0]);
             }
-            function openList()  { combo.classList.add('open'); }
-            function closeList() { combo.classList.remove('open'); }
-            function pick(o) {
-                hidden.value = o.dataset.value;
-                chosenLabel  = o.textContent.trim();
-                input.value  = chosenLabel;
-                closeList();
-            }
-
-            input.addEventListener('focus', function () {
-                input.select(); opts.forEach(function (o) { o.classList.remove('hidden'); });
-                none.style.display = 'none'; openList();
-            });
-            input.addEventListener('input', function () { openList(); filter(); });
-            input.addEventListener('keydown', function (e) {
-                var vis = opts.filter(function (o) { return !o.classList.contains('hidden'); });
-                var idx = vis.findIndex(function (o) { return o.classList.contains('active'); });
-                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                e.preventDefault(); openList();
-                if (!vis.length) return;
-                if (idx >= 0) vis[idx].classList.remove('active');
-                idx = e.key === 'ArrowDown' ? (idx + 1) % vis.length : (idx - 1 + vis.length) % vis.length;
-                vis[idx].classList.add('active'); vis[idx].scrollIntoView({block: 'nearest'});
-                } else if (e.key === 'Enter') {
-                if (combo.classList.contains('open') && vis.length) {
-                    e.preventDefault(); pick(idx >= 0 ? vis[idx] : vis[0]);
-                }
-                } else if (e.key === 'Escape') { input.value = chosenLabel; closeList(); }
-            });
-            opts.forEach(function (o) {
-                o.addEventListener('mousedown', function (e) { e.preventDefault(); pick(o); });
-            });
-            document.addEventListener('mousedown', function (e) {
-                if (!combo.contains(e.target)) { input.value = chosenLabel; closeList(); }
-            });
-            })();
-        </script>
-    {% endblock %}
-
-
+        } else if (e.key === 'Escape') { input.value = chosenLabel; closeList(); }
+    });
+    opts.forEach(function (o) {
+        o.addEventListener('mousedown', function (e) { e.preventDefault(); pick(o); });
+    });
+    document.addEventListener('mousedown', function (e) {
+        if (!combo.contains(e.target)) { input.value = chosenLabel; closeList(); }
+    });
+})();
+</script>
 {% endblock %}

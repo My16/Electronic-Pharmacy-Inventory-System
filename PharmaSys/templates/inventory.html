@@ -203,6 +203,20 @@ select.form-control{cursor:pointer}
 .loc-chip.locked{background:rgba(245,158,11,.14);color:#b45309}
 .loc-chip.so{background:rgba(59,91,219,.12);color:#3b5bdb}
 
+.view-toggle{display:inline-flex;border:1px solid #e0e6ed;border-radius:8px;overflow:hidden}
+.view-toggle button{border:none;background:#fff;color:#64748b;padding:7px 12px;font-size:12.5px;font-weight:600;font-family:'Poppins',sans-serif;cursor:pointer;display:flex;align-items:center;gap:6px}
+.view-toggle button.active{background:#00ADB5;color:#fff}
+tr.grp-hidden{display:none!important}
+tr.group-row{cursor:pointer;background:#eef6f7;border-top:2px solid #fff}
+tr.group-row:hover{background:#e2f1f3}
+tr.group-row td{padding:10px 16px!important}
+.grp-inner{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.grp-chev{font-size:11px;color:#00ADB5;transition:transform .2s}
+tr.group-row.open .grp-chev{transform:rotate(90deg)}
+.grp-code{background:#00ADB5;color:#fff;border-radius:6px;padding:2px 9px;font-size:11.5px;font-weight:700}
+.grp-name{font-weight:700;color:#1a2433;font-size:13px}
+.grp-meta{font-size:11.5px;color:#78909c}
+
 
 </style>
 {% endblock %}
@@ -275,7 +289,7 @@ select.form-control{cursor:pointer}
     <div class="table-toolbar">
         <div class="toolbar-left">
             <span class="table-title">Medicine List</span>
-            <span class="count-badge">{{ paginator.count }} total</span>
+            <span class="count-badge">{{ paginator.count }} {% if view_mode == 'group' %}stock codes{% else %}total{% endif %}</span>
             <div class="per-page-wrap">
                 Show
                 <select onchange="changePerPage(this.value)">
@@ -290,11 +304,20 @@ select.form-control{cursor:pointer}
                 <input type="hidden" name="status"   value="{{ status_filter }}">
                 <input type="hidden" name="dosage"   value="{{ dosage_filter }}">
                 <input type="hidden" name="per_page" value="{{ per_page }}">
+                <input type="hidden" name="view" value="{{ view_mode }}">
                 <div class="search-box">
                     <i class="fas fa-search"></i>
                     <input type="text" name="search" placeholder="Search name, code, barcode…" value="{{ search }}" autocomplete="off" oninput="debounceSearch(this)">
                 </div>
             </form>
+            <div class="view-toggle">
+                <button type="button" class="{% if view_mode != 'group' %}active{% endif %}" onclick="applyFilter('view','')"><i class="fas fa-list"></i> List</button>
+                <button type="button" class="{% if view_mode == 'group' %}active{% endif %}" onclick="applyFilter('view','group')"><i class="fas fa-layer-group"></i> By Stock Code</button>
+            </div>
+            {% if view_mode == 'group' %}
+            <button class="btn-scan" onclick="toggleAllGroups(true)"><i class="fas fa-angles-down"></i> Expand</button>
+            <button class="btn-scan" onclick="toggleAllGroups(false)"><i class="fas fa-angles-up"></i> Collapse</button>
+            {% endif %}
             <button class="btn-scan" onclick="openScanner()"><i class="fas fa-barcode"></i> Scan</button>
             <button class="btn-scan" onclick="openStockCodes()"><i class="fas fa-hashtag"></i> Stock Codes</button>
             {% if can_manage %}
@@ -325,7 +348,7 @@ select.form-control{cursor:pointer}
             <option value="supply_office" {% if status_filter == 'supply_office' %}selected{% endif %}>In Supply Office</option>
         </select>
         {% if search or category_id or status_filter or dosage_filter %}
-        <a href="{% url 'inventory' %}" style="font-size:12px;color:#dc2626;text-decoration:none;font-weight:600;"><i class="fas fa-xmark"></i> Clear</a>
+        <a href="{% url 'inventory' %}{% if view_mode == 'group' %}?view=group{% endif %}" style="font-size:12px;color:#dc2626;text-decoration:none;font-weight:600;"><i class="fas fa-xmark"></i> Clear</a>
         {% endif %}
     </div>
 
@@ -341,8 +364,26 @@ select.form-control{cursor:pointer}
         <tbody>
             {% for m in medicines %}
             {# ─── Medicine row ─── #}
-            <tr class="med-row {% if m.dnr_qty %}has-dnr{% endif %} {% if highlight_pk == m.pk|stringformat:'s' %}highlight-row{% endif %}" id="row-{{ m.pk }}">
-                <td style="color:#b0bec5;font-size:11.5px;">{{ page_obj.start_index|add:forloop.counter0 }}</td>
+            {% if view_mode == 'group' and m.group_start %}{% with g=m.group_start %}
+            <tr class="group-row {% if g.open %}open{% endif %}" id="grp-{{ g.id }}" onclick="toggleGroup({{ g.id }})">
+                <td colspan="10">
+                    <div class="grp-inner">
+                        <i class="fas fa-chevron-right grp-chev"></i>
+                        {% if g.code %}<span class="grp-code">{{ g.code }}</span>{% endif %}
+                        <span class="grp-name">{{ g.name }}</span>
+                        <span class="grp-meta">{{ g.count }} variant{{ g.count|pluralize }}</span>
+                        {% if g.s2 %}<span style="background:rgba(139,92,246,.1);color:#7c3aed;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;"><i class="fas fa-shield-halved"></i> S2</span>{% endif %}
+                        {% if g.low %}<span class="stock-badge low-stock"><span class="stock-dot"></span>{{ g.low }} low</span>{% endif %}
+                        {% if g.out %}<span class="stock-badge out-stock"><span class="stock-dot"></span>{{ g.out }} out</span>{% endif %}
+                        {% if g.dnr %}<span class="dnr-chip" style="cursor:default"><i class="fas fa-hand"></i> {{ g.dnr }} on hold</span>{% endif %}
+                        {% if g.locked %}<span class="hold-chip lock"><i class="fas fa-lock"></i> {{ g.locked }} locked</span>{% endif %}
+                        {% if g.so %}<span class="hold-chip so"><i class="fas fa-building"></i> {{ g.so }} in Supply Office</span>{% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% endwith %}{% endif %}
+            <tr class="med-row {% if m.dnr_qty %}has-dnr{% endif %} {% if highlight_pk == m.pk|stringformat:'s' %}highlight-row{% endif %}{% if view_mode == 'group' and not m.grp_open %} grp-hidden{% endif %}" id="row-{{ m.pk }}"{% if view_mode == 'group' %} data-grp="{{ m.grp_id }}"{% endif %}>
+                <td style="color:#b0bec5;font-size:11.5px;">{% if view_mode == 'group' %}{{ m.idx }}{% else %}{{ page_obj.start_index|add:forloop.counter0 }}{% endif %}</td>
                 <td>
                     <div class="med-name">
                         {{ m.medicine_name }}
@@ -457,7 +498,7 @@ select.form-control{cursor:pointer}
             </tr>
 
             {# ─── Batch expand row ─── #}
-            <tr class="batch-expand-row" id="batchrow-{{ m.pk }}">
+            <tr class="batch-expand-row{% if view_mode == 'group' and not m.grp_open %} grp-hidden{% endif %}" id="batchrow-{{ m.pk }}"{% if view_mode == 'group' %} data-grp="{{ m.grp_id }}"{% endif %}>
                 <td class="batch-expand-cell" colspan="10">
                     <div class="batch-inner">
                         <div class="batch-label"><i class="fas fa-layer-group"></i> Batches for {{ m.medicine_name }} — FEFO Order (oldest expiry deducted first)</div>
@@ -548,7 +589,7 @@ select.form-control{cursor:pointer}
 
     {% if paginator.num_pages > 1 %}
     <div class="pagination-bar">
-        <div class="pagination-info">Showing <strong>{{ page_obj.start_index }}</strong>–<strong>{{ page_obj.end_index }}</strong> of <strong>{{ paginator.count }}</strong> medicines</div>
+        <div class="pagination-info">Showing <strong>{{ page_obj.start_index }}</strong>–<strong>{{ page_obj.end_index }}</strong> of <strong>{{ paginator.count }}</strong> {% if view_mode == 'group' %}stock codes{% else %}medicines{% endif %}</div>
         <div class="pagination-links">
             {% if page_obj.has_previous %}<a class="page-btn" href="?{% url_replace 'page' 1 %}">«</a><a class="page-btn" href="?{% url_replace 'page' page_obj.previous_page_number %}">‹</a>{% else %}<span class="page-btn disabled">«</span><span class="page-btn disabled">‹</span>{% endif %}
             {% for num in paginator.page_range %}{% if page_obj.number == num %}<span class="page-btn active">{{ num }}</span>{% elif num >= page_obj.number|add:'-2' and num <= page_obj.number|add:'2' %}<a class="page-btn" href="?{% url_replace 'page' num %}">{{ num }}</a>{% endif %}{% endfor %}
@@ -1228,6 +1269,21 @@ document.addEventListener('DOMContentLoaded', function() {
         if (pk) setTimeout(function() { toggleBatches(pk); }, 700);
     }
 });
+
+// ── Stock-code groups ─────────────────────────────────────
+function toggleGroup(id) {
+    var hdr = document.getElementById('grp-' + id);
+    if (!hdr) return;
+    var open = hdr.classList.toggle('open');
+    document.querySelectorAll('tr[data-grp="' + id + '"]').forEach(function(r) {
+        r.classList.toggle('grp-hidden', !open);
+    });
+}
+function toggleAllGroups(open) {
+    document.querySelectorAll('tr.group-row').forEach(function(h) {
+        if (h.classList.contains('open') !== open) toggleGroup(h.id.replace('grp-', ''));
+    });
+}
 
 // ── Toast ─────────────────────────────────────────────────
 function showToast(msg, type) {

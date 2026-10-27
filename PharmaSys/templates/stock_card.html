@@ -27,6 +27,8 @@
   .sc-opt{padding:7px 10px;font-size:13px;cursor:pointer}
   .sc-opt:hover,.sc-opt.active{background:#E0F7F8}
   .sc-opt.hidden{display:none}
+  .sc-group{padding:5px 10px;font-size:10px;font-weight:700;letter-spacing:.5px;
+          color:#78909C;background:#F4F7FA;text-transform:uppercase}
   .sc-noresult{padding:8px 10px;font-size:12px;color:#78909C;display:none}
 
   /* ── view toggle ── */
@@ -74,15 +76,24 @@
 {% block content %}
 <form method="get" class="sc-filter no-print" id="scForm">
   <div>
-    <label>Medicine <span style="font-weight:400">(type to search)</span></label>
+    <label>Stock No. / Medicine <span style="font-weight:400">(type to search)</span></label>
     <div class="sc-combo" id="medCombo">
-      <input type="text" id="medSearch" placeholder="Search medicine…" autocomplete="off">
+      <input type="text" id="medSearch" placeholder="Search stock no. or medicine…" autocomplete="off">
       <i class="fas fa-chevron-down caret"></i>
       <input type="hidden" name="medicine" id="medValue" value="{{ med_param }}">
       <div class="sc-combo-list" id="medList">
         <div class="sc-opt" data-value="all">All medicines (with activity)</div>
+
+        {% if stock_codes %}
+        <div class="sc-group">Stock Codes (all variants)</div>
+        {% for sc in stock_codes %}
+        <div class="sc-opt" data-value="sc-{{ sc.pk }}">{{ sc.code }} — {{ sc.generic_name }} (all)</div>
+        {% endfor %}
+        <div class="sc-group">Stock No.</div>
+        {% endif %}
+
         {% for m in medicines %}
-        <div class="sc-opt" data-value="{{ m.pk }}">{{ m.medicine_name }} {{ m.strength }}</div>
+        <div class="sc-opt" data-value="{{ m.pk }}">{{ m.sub_code|default:"—" }} — {{ m.medicine_name }} {{ m.strength }}</div>
         {% endfor %}
         <div class="sc-noresult" id="medNone">No medicine found.</div>
       </div>
