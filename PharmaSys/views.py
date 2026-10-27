@@ -14,7 +14,7 @@ from django.db.models.functions import TruncDay, TruncWeek, TruncMonth
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from .models import (
     UserProfile, UserPermission, Medicine, MedicineCategory, MedicineStock,
-    Supplier, StockMovement, Dispensing, DispensingItem, Doctor, Ward
+    Supplier, StockMovement, Dispensing, DispensingItem, Doctor, Ward, StockCode
 )
 import json
 import io
@@ -380,7 +380,7 @@ def inventory_view(request):
     except ValueError:
         per_page = 15
 
-    medicines_qs = Medicine.objects.select_related('category', 'supplier', 'location').filter(
+    medicines_qs = Medicine.objects.select_related('category', 'supplier', 'location', 'stock_code').filter(
         is_active=True
     ).prefetch_related(
         Prefetch('batches', queryset=MedicineStock.objects.select_related('location', 'supplier'))
@@ -390,7 +390,8 @@ def inventory_view(request):
         medicines_qs = medicines_qs.filter(
             Q(medicine_name__icontains=search) | Q(generic_name__icontains=search) |
             Q(brand_name__icontains=search)    | Q(barcode__icontains=search)       |
-            Q(batches__batch_number__icontains=search)
+            Q(batches__batch_number__icontains=search) |
+            Q(sub_code__icontains=search) | Q(stock_code__code__icontains=search)
         ).distinct()
     if category_id:
         medicines_qs = medicines_qs.filter(category_id=category_id)
@@ -515,9 +516,16 @@ def inventory_add_view(request):
                 messages.error(request, f'Location "{loc.code}" is locked. Unlock it or pick another.')
                 return redirect('inventory')
 
+            sc, sub_code, err = _resolve_stock_code(request)
+            if err:
+                messages.error(request, err)
+                return redirect('inventory')
+
             medicine = Medicine.objects.create(
                 medicine_name    = request.POST.get('medicine_name', '').strip(),
-                generic_name     = request.POST.get('generic_name', '').strip(),
+                generic_name     = sc.generic_name,
+                stock_code       = sc,
+                sub_code         = sub_code,
                 brand_name       = request.POST.get('brand_name', '').strip(),
                 category_id      = request.POST.get('category') or None,
                 dosage_form      = request.POST.get('dosage_form', 'tablet'),
@@ -607,8 +615,15 @@ def inventory_edit_view(request, pk):
                         f'Batch) before switching between the pharmacy and a Supply Office.')
                     return redirect('inventory')
 
+            sc, sub_code, err = _resolve_stock_code(request, exclude_pk=medicine.pk)
+            if err:
+                messages.error(request, err)
+                return redirect('inventory')
+
             medicine.medicine_name    = request.POST.get('medicine_name', '').strip()
-            medicine.generic_name     = request.POST.get('generic_name', '').strip()
+            medicine.generic_name     = sc.generic_name
+            medicine.stock_code       = sc
+            medicine.sub_code         = sub_code
             medicine.brand_name       = request.POST.get('brand_name', '').strip()
             medicine.category_id      = request.POST.get('category') or None
             medicine.dosage_form      = request.POST.get('dosage_form', 'tablet')
@@ -725,9 +740,11 @@ def medicine_search_ajax(request):
             Q(generic_name__icontains=q)  |
             Q(brand_name__icontains=q)    |
             Q(barcode__icontains=q)       |
-            Q(strength__icontains=q)
+            Q(strength__icontains=q)      |
+            Q(sub_code__icontains=q) | 
+            Q(stock_code__code__icontains=q)
         ).distinct()
-    qs = qs.select_related('supplier')[:30]
+    qs = qs.select_related('supplier', 'stock_code')[:30]
     results = []
     for m in qs:
         # Earliest non-expired active batch for display
@@ -756,6 +773,8 @@ def medicine_search_ajax(request):
             'selling_price':  str(m.selling_price),
             'barcode':        m.barcode or '',
             'location_id':    m.location_id or '',
+            'sub_code':       m.sub_code or '',
+            'stock_code':     m.stock_code.code if m.stock_code else '',
         })
     return JsonResponse({'results': results})
 
@@ -1120,6 +1139,7 @@ def stock_medicine_info(request):
 
         return JsonResponse({
             'found':          True,
+            'sub_code':       m.sub_code or '',
             'medicine_name':  m.medicine_name,
             'generic_name':   m.generic_name,
             'strength':       m.strength,
@@ -2540,7 +2560,7 @@ def average_consumption_context(request, submitted_by, position):
         avg_month = round(total / month_div, 2)
         stock     = stock_map.get(med.pk, 0)
         rows.append({
-            'item_code':       med.barcode or f"MED-{med.pk:04d}",
+            'item_code':       med.sub_code or med.barcode or f"MED-{med.pk:04d}",
             'description':     f"{med.medicine_name} {med.strength}",
             'unit_of_measure': med.dosage_form,
             'months':          vals,
@@ -2705,7 +2725,7 @@ def consumption_report(request):
         uom = med.dosage_form  # tablet / capsule / vial / etc.
  
         rows.append({
-            'item_code':        med.barcode or f"MED-{med.pk:04d}",
+            'item_code':        med.sub_code or med.barcode or f"MED-{med.pk:04d}",
             'description':      f"{med.medicine_name} {med.strength}",
             'unit_of_measure':  uom,
             'previous_balance': previous_balance,
@@ -3829,6 +3849,119 @@ def link_patient_to_dispensing(request, pk):
 
 
 
+    
+import re as _re
+_CODE_RE = _re.compile(r'^[A-Z0-9]{2,20}$')
+
+
+def _resolve_stock_code(request, exclude_pk=None):
+    """Validates stock_code + sub_code from a medicine form. -> (sc, sub, error)"""
+    sc = StockCode.objects.filter(pk=_to_int(request.POST.get('stock_code')) or 0).first()
+    if not sc:
+        return None, None, 'Search and select a Generic Name from the Stock Code list.'
+    sub = request.POST.get('sub_code', '').strip().upper()
+    if not sub:
+        return None, None, 'Sub Stock Code is required.'
+    if len(sub) > 40:
+        return None, None, 'Sub Stock Code is too long.'
+    if not sub.startswith(sc.code + '-') or len(sub) == len(sc.code) + 1:
+        return None, None, f'Sub Stock Code must start with "{sc.code}-" (e.g. {sc.next_sub_code()}).'
+    dup = Medicine.objects.filter(sub_code=sub)
+    if exclude_pk:
+        dup = dup.exclude(pk=exclude_pk)
+    if dup.exists():
+        return None, None, f'Sub Stock Code "{sub}" is already used by another medicine.'
+    return sc, sub, None
+
+
+def _clean_stock_code_payload(request):
+    try:
+        data = json.loads(request.body or b'{}')
+    except (ValueError, TypeError):
+        return None, None, 'Invalid data.'
+    code = str(data.get('code', '') or '').strip().upper()
+    name = str(data.get('generic_name', '') or '').strip()
+    if not _CODE_RE.match(code):
+        return None, None, 'Stock Code must be 2–20 letters/numbers only (e.g. DM003).'
+    if not name:
+        return None, None, 'Generic Name is required.'
+    return code, name, None
+
+
+@require(('inventory', 'stock_management'), ajax=True)
+def stock_code_search_ajax(request):
+    q  = request.GET.get('q', '').strip()
+    qs = StockCode.objects.prefetch_related(
+        Prefetch('medicines', queryset=Medicine.objects.filter(is_active=True)
+                 .order_by('sub_code'), to_attr='active_variants'))
+    if q:
+        qs = qs.filter(Q(code__icontains=q) | Q(generic_name__icontains=q))
+    limit = 300 if request.GET.get('all') else 20
+    results = []
+    for s in qs.order_by('code')[:limit]:
+        results.append({
+            'pk': s.pk, 'code': s.code, 'generic_name': s.generic_name,
+            'count': len(s.active_variants), 'next_sub': s.next_sub_code(),
+            'variants': [{'sub_code': m.sub_code or '—', 'name': m.medicine_name,
+                          'strength': m.strength, 'form': m.get_dosage_form_display()}
+                         for m in s.active_variants],
+        })
+    return JsonResponse({'results': results})
+
+
+@require('inventory', 'edit', ajax=True)
+@require_POST
+def stock_code_create(request):
+    code, name, err = _clean_stock_code_payload(request)
+    if err:
+        return JsonResponse({'error': err}, status=400)
+    if StockCode.objects.filter(code__iexact=code).exists():
+        return JsonResponse({'error': f'Stock Code "{code}" already exists.'}, status=400)
+    if StockCode.objects.filter(generic_name__iexact=name).exists():
+        return JsonResponse({'error': f'"{name}" already has a Stock Code.'}, status=400)
+    sc = StockCode.objects.create(code=code, generic_name=name, created_by=request.user)
+    return JsonResponse({'success': True, 'pk': sc.pk, 'message': f'Stock Code {sc.code} added.'})
+
+
+@require('inventory', 'edit', ajax=True)
+@require_POST
+@transaction.atomic
+def stock_code_update(request, pk):
+    sc = get_object_or_404(StockCode, pk=pk)
+    code, name, err = _clean_stock_code_payload(request)
+    if err:
+        return JsonResponse({'error': err}, status=400)
+    if StockCode.objects.filter(code__iexact=code).exclude(pk=pk).exists():
+        return JsonResponse({'error': f'Stock Code "{code}" already exists.'}, status=400)
+    if StockCode.objects.filter(generic_name__iexact=name).exclude(pk=pk).exists():
+        return JsonResponse({'error': f'"{name}" already has a Stock Code.'}, status=400)
+
+    old_code = sc.code
+    sc.code, sc.generic_name = code, name
+    sc.save()
+    # keep medicines consistent with the master record
+    Medicine.objects.filter(stock_code=sc).update(generic_name=name)
+    if old_code != sc.code:
+        for m in Medicine.objects.filter(stock_code=sc, sub_code__startswith=old_code + '-'):
+            m.sub_code = sc.code + m.sub_code[len(old_code):]
+            m.save(update_fields=['sub_code', 'updated_at'])
+    return JsonResponse({'success': True, 'message': f'Stock Code {sc.code} updated.'})
+
+
+@require(level='admin', ajax=True)
+@require_POST
+def stock_code_delete(request, pk):
+    sc = get_object_or_404(StockCode, pk=pk)
+    n = sc.medicines.count()
+    if n:
+        return JsonResponse({'error': f'Cannot delete {sc.code}: {n} medicine(s) still use it.'}, status=400)
+    code = sc.code
+    sc.delete()
+    return JsonResponse({'success': True, 'message': f'Stock Code {code} deleted.'})
+
+
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CATEGORY — AJAX search + create
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4326,7 +4459,8 @@ def storage_find_medicine(request):
     meds = list(
         _live_meds_qs()
         .filter(Q(medicine_name__icontains=q) | Q(generic_name__icontains=q) |
-                Q(brand_name__icontains=q) | Q(barcode__icontains=q))
+                Q(brand_name__icontains=q) | Q(barcode__icontains=q) |
+                Q(sub_code__icontains=q) | Q(stock_code__code__icontains=q))
         .order_by('medicine_name')[:15]
     )
     splits  = {m.pk: _med_split(m) for m in meds}
@@ -5491,7 +5625,7 @@ def _stock_card_build(med, date_from, date_to, rows_per_page):
         'has_events': bool(rows),
         'price': f'{price:,.2f}',
         'unit': STOCK_CARD_UNITS.get(med.dosage_form, 'piece'),
-        'stock_no': med.barcode or f'MED-{med.pk:04d}',
+        'stock_no': med.sub_code or med.barcode or f'MED-{med.pk:04d}',
         'description': desc,
         'reorder': med.reorder_level,
     }
@@ -5919,7 +6053,7 @@ def _supplies_ledger_build(med, date_from, date_to, rows_per_page, group):
         'med': med, 'pages': pages, 'has_events': bool(rows), 'opening': opening_qty,
         'item': med.medicine_name, 'description': desc,
         'unit': STOCK_CARD_UNITS.get(med.dosage_form, 'piece'),
-        'stock_no': f'MED-{med.pk:04d}', 'code': med.barcode or '',
+        'stock_no': med.sub_code or f'MED-{med.pk:04d}', 'code': med.sub_code or med.barcode or '',
     }
 
 

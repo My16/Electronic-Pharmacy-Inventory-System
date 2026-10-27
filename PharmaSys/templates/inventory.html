@@ -292,10 +292,11 @@ select.form-control{cursor:pointer}
                 <input type="hidden" name="per_page" value="{{ per_page }}">
                 <div class="search-box">
                     <i class="fas fa-search"></i>
-                    <input type="text" name="search" placeholder="Search name, barcode…" value="{{ search }}" autocomplete="off" oninput="debounceSearch(this)">
+                    <input type="text" name="search" placeholder="Search name, code, barcode…" value="{{ search }}" autocomplete="off" oninput="debounceSearch(this)">
                 </div>
             </form>
             <button class="btn-scan" onclick="openScanner()"><i class="fas fa-barcode"></i> Scan</button>
+            <button class="btn-scan" onclick="openStockCodes()"><i class="fas fa-hashtag"></i> Stock Codes</button>
             {% if can_manage %}
             <button class="btn-add" onclick="openAddModal()"><i class="fas fa-plus"></i> Add Medicine</button>
             {% endif %}
@@ -351,7 +352,7 @@ select.form-control{cursor:pointer}
                         </span>
                         {% endif %}
                     </div>
-                    <div class="med-sub">{{ m.generic_name }}{% if m.brand_name %} · {{ m.brand_name }}{% endif %} · {{ m.strength }}</div>
+                    <div class="med-sub">{% if m.sub_code %}<strong style="color:#00ADB5">{{ m.sub_code }}</strong> · {% endif %}{{ m.generic_name }}{% if m.brand_name %} · {{ m.brand_name }}{% endif %} · {{ m.strength }}</div>
                 </td>
                 <td style="color:#64748b;">
                     {{ m.category.name|default:"—" }}
@@ -422,6 +423,9 @@ select.form-control{cursor:pointer}
                         {% if can_manage %}
                         <button class="btn-icon edit" title="Edit Medicine"
                             data-pk="{{ m.pk }}"
+                            data-stock_code_pk="{{ m.stock_code_id|default:'' }}"
+                            data-stock_code="{{ m.stock_code.code|default:'' }}"
+                            data-sub_code="{{ m.sub_code|default:'' }}"
                             data-medicine_name="{{ m.medicine_name }}"
                             data-generic_name="{{ m.generic_name }}"
                             data-brand_name="{{ m.brand_name|default:'' }}"
@@ -586,7 +590,29 @@ select.form-control{cursor:pointer}
                 <div class="section-label">Medicine Information</div>
                 <div class="form-grid">
                     <div class="form-group"><label class="form-label">Medicine Name *</label><input type="text" name="medicine_name" class="form-control" required></div>
-                    <div class="form-group"><label class="form-label">Generic Name *</label><input type="text" name="generic_name" class="form-control" required></div>
+                    <div class="form-group">
+                        <label class="form-label">Generic Name *</label>
+                        <input type="hidden" name="stock_code" id="add_sc_id">
+                        <div class="cat-picker" id="add_sc_picker">
+                            <div class="cat-picker-wrap">
+                                <input type="text" class="cat-search-input" id="add_sc_search" placeholder="Search generic name or stock code…" autocomplete="off"
+                                    oninput="scSearch('add',this.value)" onfocus="scSearch('add',this.value)">
+                                <button type="button" class="cat-clear-btn" id="add_sc_clear" style="display:none" onclick="scClear('add')"><i class="fas fa-xmark"></i></button>
+                            </div>
+                            <div class="cat-dropdown" id="add_sc_dropdown"></div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Stock Code</label>
+                        <input type="text" id="add_sc_code" class="form-control" readonly placeholder="Auto-filled" style="background:#eef2f7;font-weight:700">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Sub Stock Code *</label>
+                        <input type="text" name="sub_code" id="add_sub_code" class="form-control" required maxlength="40"
+                            placeholder="e.g. DM003-001" oninput="this.value=this.value.toUpperCase()">
+                        <span style="font-size:11px;color:#78909c;">Suggested automatically — you can type your own, but it must start with the Stock Code and a dash.</span>
+                        <div id="add_sc_variants" style="font-size:11.5px;color:#64748b;margin-top:4px;"></div>
+                    </div>
                     <div class="form-group"><label class="form-label">Brand Name</label><input type="text" name="brand_name" class="form-control"></div>
                     <!-- Searchable Category Picker -->
                     <div class="form-group">
@@ -657,7 +683,29 @@ select.form-control{cursor:pointer}
                 <div class="section-label">Medicine Information</div>
                 <div class="form-grid">
                     <div class="form-group"><label class="form-label">Medicine Name *</label><input type="text" name="medicine_name" id="e_medicine_name" class="form-control" required></div>
-                    <div class="form-group"><label class="form-label">Generic Name *</label><input type="text" name="generic_name" id="e_generic_name" class="form-control" required></div>
+                    <div class="form-group">
+                        <label class="form-label">Generic Name *</label>
+                        <input type="hidden" name="stock_code" id="edit_sc_id">
+                        <div class="cat-picker" id="edit_sc_picker">
+                            <div class="cat-picker-wrap">
+                                <input type="text" class="cat-search-input" id="edit_sc_search" placeholder="Search generic name or stock code…" autocomplete="off"
+                                    oninput="scSearch('edit',this.value)" onfocus="scSearch('edit',this.value)">
+                                <button type="button" class="cat-clear-btn" id="edit_sc_clear" style="display:none" onclick="scClear('edit')"><i class="fas fa-xmark"></i></button>
+                            </div>
+                            <div class="cat-dropdown" id="edit_sc_dropdown"></div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Stock Code</label>
+                        <input type="text" id="edit_sc_code" class="form-control" readonly placeholder="Auto-filled" style="background:#eef2f7;font-weight:700">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Sub Stock Code *</label>
+                        <input type="text" name="sub_code" id="edit_sub_code" class="form-control" required maxlength="40"
+                            placeholder="e.g. DM003-001" oninput="this.value=this.value.toUpperCase()">
+                        <span style="font-size:11px;color:#78909c;">Must start with the Stock Code and a dash.</span>
+                        <div id="edit_sc_variants" style="font-size:11.5px;color:#64748b;margin-top:4px;"></div>
+                    </div>
                     <div class="form-group"><label class="form-label">Brand Name</label><input type="text" name="brand_name" id="e_brand_name" class="form-control"></div>
                     <!-- Searchable Category Picker -->
                     <div class="form-group">
@@ -811,6 +859,38 @@ select.form-control{cursor:pointer}
     </div>
 </div>
 
+<!-- Stock Code Modal -->
+<div class="modal-overlay" id="scModal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title"><i class="fas fa-hashtag"></i>Stock Codes</div>
+            <button class="modal-close" onclick="closeModal('scModal')"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <div class="section-label">Add / Edit Stock Code</div>
+            <input type="hidden" id="sc_edit_pk">
+            <div class="form-grid">
+                <div class="form-group"><label class="form-label">Stock Code *</label>
+                    <input type="text" id="sc_code" class="form-control" maxlength="20" placeholder="e.g. DM003" oninput="this.value=this.value.toUpperCase()"></div>
+                <div class="form-group"><label class="form-label">Generic Name *</label>
+                    <input type="text" id="sc_generic" class="form-control" placeholder="e.g. Acetylcysteine"></div>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+                <button type="button" class="btn-cancel" id="sc_cancel_edit" style="display:none" onclick="scResetForm()">Cancel edit</button>
+                <button type="button" class="btn-submit" id="sc_save_btn" onclick="scSave()">Add Stock Code</button>
+            </div>
+
+            <div class="section-label">Existing Stock Codes</div>
+            <div class="search-box" style="margin-bottom:10px;"><i class="fas fa-search"></i>
+                <input type="text" id="sc_filter" placeholder="Filter…" style="width:100%" oninput="scLoadList()"></div>
+            <table class="data-table">
+                <thead><tr><th>Code</th><th>Generic Name</th><th>Medicines</th><th>Actions</th></tr></thead>
+                <tbody id="sc_list"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
 <div class="toast" id="toast"><i class="fas fa-circle-check"></i><span id="toastMsg"></span></div>
 {% endblock %}
 
@@ -825,6 +905,10 @@ const URLS = {
     category_search:   "{% url 'category_search_ajax' %}",
     category_create:   "{% url 'category_create_ajax' %}",
     batch_dnr:         "{% url 'batch_dnr' pk=0 %}".replace('/0/', '/__PK__/'),
+    stock_code_search: "{% url 'stock_code_search_ajax' %}",
+    stock_code_create: "{% url 'stock_code_create' %}",
+    stock_code_update: "{% url 'stock_code_update' pk=0 %}".replace('/0/', '/__PK__/'),
+    stock_code_delete: "{% url 'stock_code_delete' pk=0 %}".replace('/0/', '/__PK__/'),
 };
 const CSRF = '{{ csrf_token }}';
 
@@ -843,6 +927,8 @@ function closeModal(id) {
     document.getElementById(id).classList.remove('open');
     if (id === 'addModal')  catClear('add');
     if (id === 'editModal') catClear('edit');
+    if (id === 'addModal')  scClear('add');
+    if (id === 'editModal') scClear('edit');
 }
 document.querySelectorAll('.modal-overlay').forEach(function(o) {
     o.addEventListener('click', function(e) {
@@ -859,6 +945,7 @@ function openAddModal() {
     catClear('add');
     document.getElementById('add_location').value = '';
     openModal('addModal');
+    scClear('add');
 }
 
 // ── Edit Modal ────────────────────────────────────────────
@@ -884,6 +971,10 @@ function openEditModal(btn) {
     var catPk   = btn.getAttribute('data-category-pk')   || '';
     var catName = btn.getAttribute('data-category-name')  || '';
     catSetValue('edit', catPk, catName);
+
+    scSetValue('edit', btn.getAttribute('data-stock_code_pk'), btn.getAttribute('data-stock_code'),
+            btn.getAttribute('data-generic_name'), btn.getAttribute('data-sub_code'));
+
 
     openModal('editModal');
 }
@@ -1151,5 +1242,146 @@ function showToast(msg, type) {
 {% if messages %}{% for message in messages %}
     showToast("{{ message }}", "{% if 'error' in message.tags %}error{% else %}success{% endif %}");
 {% endfor %}{% endif %}
+
+
+
+// ── Stock Code: searchable generic-name picker ────────────
+var scTimers = {}, scCache = {}, scSelectedName = {};
+function _esc(s){ var d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; }
+
+function scSearch(prefix, query) {
+    // typing something different from the chosen name un-selects it
+    if (document.getElementById(prefix+'_sc_id').value && query !== scSelectedName[prefix]) {
+        document.getElementById(prefix+'_sc_id').value = '';
+        document.getElementById(prefix+'_sc_code').value = '';
+        document.getElementById(prefix+'_sub_code').value = '';
+    }
+    clearTimeout(scTimers[prefix]);
+    scTimers[prefix] = setTimeout(function(){ _scFetch(prefix, query); }, 250);
+}
+function _scFetch(prefix, query) {
+    var dd = document.getElementById(prefix+'_sc_dropdown');
+    if (document.getElementById(prefix+'_sc_id').value) { dd.classList.remove('open'); return; }
+    fetch(URLS.stock_code_search + '?q=' + encodeURIComponent(query.trim()))
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        scCache[prefix] = data.results;
+        dd.innerHTML = data.results.length
+          ? data.results.map(function(s,i){
+              return '<div class="cat-option" onclick="scSelect(\''+prefix+'\','+i+')"><strong>'+_esc(s.code)+'</strong> — '
+                + _esc(s.generic_name)+' <span style="color:#94a3b8;font-size:11px">· '+s.count+' variant'+(s.count==1?'':'s')+'</span></div>';
+            }).join('')
+          : '<div class="cat-empty">No match. Add it first via the “Stock Codes” button.</div>';
+        dd.classList.add('open');
+      })
+      .catch(function(){ dd.innerHTML='<div class="cat-empty">Search failed.</div>'; dd.classList.add('open'); });
+}
+function scSelect(prefix, idx) {
+    var s = scCache[prefix][idx];
+    var sub = document.getElementById(prefix+'_sub_code');
+    var sameCode = document.getElementById(prefix+'_sc_code').value === s.code;
+    document.getElementById(prefix+'_sc_id').value   = s.pk;
+    document.getElementById(prefix+'_sc_code').value = s.code;
+    document.getElementById(prefix+'_sc_search').value = s.generic_name;
+    scSelectedName[prefix] = s.generic_name;
+    if (!(sameCode && sub.value)) sub.value = s.next_sub;
+    var vs = s.variants || [];
+    document.getElementById(prefix+'_sc_variants').innerHTML = vs.length
+      ? '<strong>Existing variants:</strong><br>' + vs.map(function(v){
+            return _esc(v.sub_code)+' — '+_esc(v.name)+' '+_esc(v.strength)+' ('+_esc(v.form)+')';
+        }).join('<br>')
+      : 'First variant for this Stock Code.';
+    document.getElementById(prefix+'_sc_clear').style.display = 'flex';
+    document.getElementById(prefix+'_sc_dropdown').classList.remove('open');
+}
+function scClear(prefix) {
+    ['_sc_id','_sc_code','_sub_code','_sc_search'].forEach(function(x){ document.getElementById(prefix+x).value=''; });
+    scSelectedName[prefix] = '';
+    document.getElementById(prefix+'_sc_variants').innerHTML = '';
+    document.getElementById(prefix+'_sc_clear').style.display = 'none';
+    document.getElementById(prefix+'_sc_dropdown').classList.remove('open');
+}
+function scSetValue(prefix, pk, code, name, sub) {
+    scClear(prefix);
+    if (!pk) {
+        // old medicine with no stock code yet: pre-fill the search so the user can just pick the match
+        document.getElementById(prefix+'_sc_search').value = name || '';
+        return;
+    }
+    document.getElementById(prefix+'_sc_id').value = pk;
+    document.getElementById(prefix+'_sc_code').value = code;
+    document.getElementById(prefix+'_sc_search').value = name;
+    document.getElementById(prefix+'_sub_code').value = sub;
+    scSelectedName[prefix] = name;
+    document.getElementById(prefix+'_sc_clear').style.display = 'flex';
+}
+document.addEventListener('click', function(e){
+    ['add','edit'].forEach(function(p){
+        var pk = document.getElementById(p+'_sc_picker');
+        if (pk && !pk.contains(e.target)) document.getElementById(p+'_sc_dropdown').classList.remove('open');
+    });
+});
+
+// ── Stock Code manager (add / edit / delete) ──────────────
+function openStockCodes(){ scResetForm(); scLoadList(); openModal('scModal'); }
+function scResetForm(){
+    document.getElementById('sc_edit_pk').value=''; document.getElementById('sc_code').value='';
+    document.getElementById('sc_generic').value='';
+    document.getElementById('sc_save_btn').textContent='Add Stock Code';
+    document.getElementById('sc_cancel_edit').style.display='none';
+}
+function scLoadList(){
+    var q = document.getElementById('sc_filter').value.trim();
+    fetch(URLS.stock_code_search + '?all=1&q=' + encodeURIComponent(q))
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        window._scList = data.results;
+        document.getElementById('sc_list').innerHTML = data.results.length ? data.results.map(function(s,i){
+            var vs = s.variants || [];
+            var detail = vs.length ? vs.map(function(v){
+                return '<div style="padding:3px 0"><strong>'+_esc(v.sub_code)+'</strong> — '+_esc(v.name)+' '+_esc(v.strength)+' ('+_esc(v.form)+')</div>';
+            }).join('') : '<em style="color:#94a3b8">No medicines yet.</em>';
+            return '<tr style="cursor:pointer" onclick="scToggleVariants('+i+')">'
+              + '<td><strong>'+_esc(s.code)+'</strong></td><td>'+_esc(s.generic_name)+'</td>'
+              + '<td>'+s.count+' <i class="fas fa-chevron-down" style="font-size:10px;color:#94a3b8"></i></td>'
+              + '<td><div class="action-btns" onclick="event.stopPropagation()">'
+                {% if can_manage %}+ '<button class="btn-icon edit" title="Edit" onclick="scEdit('+i+')"><i class="fas fa-pen-to-square"></i></button>'{% endif %}
+                {% if can_admin %}+ '<button class="btn-icon delete" title="Delete" onclick="scDelete('+i+')"><i class="fas fa-trash-can"></i></button>'{% endif %}
+              + '</div></td></tr>'
+              + '<tr id="scv-'+i+'" style="display:none"><td colspan="4" style="background:#f8fafc;font-size:12px">'+detail+'</td></tr>';
+        }).join('') : '<tr><td colspan="4" style="text-align:center;color:#b0bec5;padding:14px">No stock codes yet.</td></tr>';
+      });
+}
+function scToggleVariants(i){
+    var r = document.getElementById('scv-'+i);
+    r.style.display = r.style.display === 'none' ? 'table-row' : 'none';
+}
+function scEdit(i){
+    var s = window._scList[i];
+    document.getElementById('sc_edit_pk').value = s.pk;
+    document.getElementById('sc_code').value = s.code;
+    document.getElementById('sc_generic').value = s.generic_name;
+    document.getElementById('sc_save_btn').textContent = 'Save Changes';
+    document.getElementById('sc_cancel_edit').style.display = 'inline-block';
+}
+function scSave(){
+    var pk = document.getElementById('sc_edit_pk').value;
+    var url = pk ? URLS.stock_code_update.replace('__PK__', pk) : URLS.stock_code_create;
+    fetch(url, { method:'POST', headers:{'X-CSRFToken':CSRF,'Content-Type':'application/json'},
+        body: JSON.stringify({ code: document.getElementById('sc_code').value, generic_name: document.getElementById('sc_generic').value }) })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if (d.success){ showToast(d.message); scResetForm(); scLoadList(); } else showToast(d.error||'Failed.','error'); })
+      .catch(function(){ showToast('Network error.','error'); });
+}
+function scDelete(i){
+    var s = window._scList[i];
+    if (!confirm('Delete Stock Code ' + s.code + ' (' + s.generic_name + ')?')) return;
+    fetch(URLS.stock_code_delete.replace('__PK__', s.pk), { method:'POST', headers:{'X-CSRFToken':CSRF} })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if (d.success){ showToast(d.message); scLoadList(); } else showToast(d.error||'Failed.','error'); })
+      .catch(function(){ showToast('Network error.','error'); });
+}
+
+
 </script>
 {% endblock %}

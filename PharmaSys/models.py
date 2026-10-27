@@ -338,6 +338,42 @@ class StorageLocation(models.Model):
 
 
 
+
+class StockCode(models.Model):
+    code         = models.CharField(max_length=20, unique=True)
+    generic_name = models.CharField(max_length=200, unique=True)
+    created_by   = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                     related_name='stock_codes_created')
+    created_at   = models.DateTimeField(auto_now_add=True)
+    updated_at   = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        self.code = (self.code or '').strip().upper()
+        self.generic_name = (self.generic_name or '').strip()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.code} — {self.generic_name}'
+
+    def next_sub_code(self):
+        prefix = f'{self.code}-'
+        nums = []
+        for s in Medicine.objects.filter(sub_code__startswith=prefix).values_list('sub_code', flat=True):
+            tail = s[len(prefix):]
+            if tail.isdigit():
+                nums.append(int(tail))
+        return f'{prefix}{(max(nums) if nums else 0) + 1:03d}'
+
+    class Meta:
+        ordering = ['code']
+        verbose_name = 'Stock Code'
+        verbose_name_plural = 'Stock Codes'
+
+
+
+
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MEDICINE  (product-level — one row per drug product)
 # batch_number / expiry_date / purchase_price moved to MedicineStock
@@ -362,6 +398,11 @@ class Medicine(models.Model):
 
     medicine_name    = models.CharField(max_length=200)
     generic_name     = models.CharField(max_length=200)
+    stock_code = models.ForeignKey(
+                     'StockCode', on_delete=models.PROTECT,
+                     null=True, blank=True, related_name='medicines')
+    sub_code   = models.CharField(max_length=40, unique=True, null=True, blank=True,
+                     verbose_name='Sub Stock Code')
     brand_name       = models.CharField(max_length=200, blank=True)
     category         = models.ForeignKey(
                            MedicineCategory, on_delete=models.SET_NULL,

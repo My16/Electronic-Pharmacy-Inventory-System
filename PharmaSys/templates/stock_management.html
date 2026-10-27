@@ -375,7 +375,7 @@ textarea.form-control{resize:vertical;min-height:70px}
                 <input type="hidden" name="per_page" value="{{ per_page }}">
                 <select name="medicine" class="filter-select">
                     <option value="">All Medicines</option>
-                    {% for m in all_medicines %}<option value="{{ m.pk }}" {% if med_filter == m.pk|stringformat:'s' %}selected{% endif %}>{{ m.medicine_name }}</option>{% endfor %}
+                    {% for m in all_medicines %}<option value="{{ m.pk }}" {% if med_filter == m.pk|stringformat:'s' %}selected{% endif %}>{% if m.sub_code %}{{ m.sub_code }} — {% endif %}{{ m.medicine_name }}</option>{% endfor %}
                 </select>
                 <select name="user" class="filter-select">
                     <option value="">All Users</option>
@@ -403,7 +403,7 @@ textarea.form-control{resize:vertical;min-height:70px}
                         <div style="font-size:12px;font-weight:600;color:#1a2433">{{ mv.created_at|date:"M d, Y" }}</div>
                         <div style="font-size:11px;color:#94a3b8">{{ mv.created_at|date:"h:i A" }}</div>
                     </td>
-                    <td><div class="med-name-cell">{{ mv.medicine.medicine_name }}</div><div class="med-sub-cell">{{ mv.medicine.strength }}</div></td>
+                    <td><div class="med-name-cell">{{ mv.medicine.medicine_name }}</div><div class="med-sub-cell">{% if mv.medicine.sub_code %}<strong style="color:#00ADB5">{{ mv.medicine.sub_code }}</strong> · {% endif %}{{ mv.medicine.strength }}</div></td>
                     <td>
                         {% if mv.batch_number %}
                             <span style="font-family:monospace;font-size:11.5px;background:#f0f4f8;padding:2px 6px;border-radius:4px;">{{ mv.batch_number }}</span>
@@ -600,7 +600,7 @@ function searchMedicines(tab, q) {
                             onclick="selectMedicineFromEl('${tab}',this)">
                     <span class="med-option-stock ${sc}">${m.stock_quantity} units</span>
                     <div class="med-option-name">${escHtml(m.medicine_name)} <span style="color:#94a3b8;font-weight:400">${escHtml(m.strength)}</span></div>
-                    <div class="med-option-sub">${escHtml(m.label)}</div>
+                    <div class="med-option-sub">${m.sub_code ? '<strong style="color:#00ADB5">' + escHtml(m.sub_code) + '</strong> · ' : ''}${escHtml(m.label)}</div>
                 </div>`;
             }).join('');
         })
@@ -629,7 +629,7 @@ function updateHeld(tab, d) {
 function selectMedicine(tab, med) {
     if (tab === 'in') clearBatchPick(true);
     document.getElementById(`${tab}_medicine_id`).value = med.pk;
-    document.getElementById(`${tab}_search_input`).value = `${med.medicine_name} ${med.strength} (${med.dosage_form})`;
+    document.getElementById(`${tab}_search_input`).value = `${med.sub_code ? med.sub_code + ' · ' : ''}${med.medicine_name} ${med.strength} (${med.dosage_form})`;
     document.getElementById(`${tab}_picker_dropdown`).classList.remove('open');
     currentStockData[tab] = med;
     updateInfoCard(tab, med);
@@ -663,7 +663,7 @@ function selectMedicine(tab, med) {
 function updateInfoCard(tab, med) {
     const card = document.getElementById(`${tab}_info_card`);
     if (!card) return;
-    document.getElementById(`${tab}_info_name`).textContent = `${med.medicine_name} ${med.strength} — ${med.dosage_form}`;
+    document.getElementById(`${tab}_info_name`).textContent = `${med.sub_code ? '[' + med.sub_code + '] ' : ''}${med.medicine_name} ${med.strength} — ${med.dosage_form}`;
     const stockEl = document.getElementById(`${tab}_info_stock`);
     if (stockEl) {
         stockEl.textContent = `${med.stock_quantity} units`;

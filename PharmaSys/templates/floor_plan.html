@@ -354,7 +354,7 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
             <div class="find-wrap">
                 <div class="search-box">
                     <i class="fas fa-search"></i>
-                    <input type="text" id="findInput" placeholder="Where is this medicine?" autocomplete="off" oninput="debounceFind(this.value)">
+                    <input type="text" id="findInput" placeholder="Where is this medicine? (name or code)" autocomplete="off" oninput="debounceFind(this.value)">
                 </div>
                 <div class="find-results" id="findResults"></div>
             </div>
@@ -417,7 +417,7 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
             <div id="medsNotes"></div>
             <div class="search-box" style="margin-bottom:12px;width:100%">
                 <i class="fas fa-search"></i>
-                <input type="text" id="medsFilter" placeholder="Filter medicines in this location…" autocomplete="off" oninput="filterMeds(this.value)" style="width:100%">
+                <input type="text" id="medsFilter" placeholder="Filter by name, code, generic…" autocomplete="off" oninput="filterMeds(this.value)" style="width:100%">
             </div>
             <div id="medsList"></div>
         </div>
@@ -630,7 +630,7 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
             <div class="form-group si-pick" style="margin-bottom:6px">
                 <label class="form-label">Medicine *</label>
                 <div class="search-box" style="width:100%"><i class="fas fa-search"></i>
-                    <input type="text" id="siSearch" placeholder="Search name, generic, barcode…" autocomplete="off" oninput="siSearch(this.value)" style="width:100%"></div>
+                    <input type="text" id="siSearch" placeholder="Search name, code, generic, barcode…" autocomplete="off" oninput="siSearch(this.value)" style="width:100%"></div>
                 <div class="si-results" id="siResults"></div>
             </div>
             <div class="si-chosen" id="siChosen"><span id="siChosenTxt"></span><button type="button" class="btn-icon sm delete" onclick="siClear()" title="Change medicine"><i class="fas fa-xmark"></i></button></div>
@@ -960,7 +960,7 @@ function openMeds(id) {
 function renderMeds(q) {
     q = (q || '').toLowerCase().trim();
     var rows = state.medsRows.filter(function(m) {
-        return !q || (m.name + ' ' + m.generic + ' ' + m.brand + ' ' + m.strength).toLowerCase().indexOf(q) !== -1;
+        return !q || (m.name + ' ' + m.sub_code + ' ' + m.generic + ' ' + m.brand + ' ' + m.strength).toLowerCase().indexOf(q) !== -1;
     });
     var box = document.getElementById('medsList');
     var curLoc = locById(state.currentLoc), isLocked = !!(curLoc && curLoc.locked), isSO = !!(curLoc && curLoc.supply_office);
@@ -974,13 +974,14 @@ function renderMeds(q) {
         var cls = m.status === 'out' ? 'out-stock' : (m.status === 'low' ? 'low-stock' : 'in-stock');
         var txt = m.status === 'out' ? 'Out of Stock' : (m.status === 'low' ? 'Low Stock' : 'In Stock');
         var color = isSO ? '#3b5bdb' : (isLocked ? '#475569' : (m.status === 'out' ? '#dc2626' : (m.status === 'low' ? '#d97706' : '#16a34a')));
-        var sub = [m.generic, m.brand, m.strength].filter(Boolean).join(' · ');
+        var sub = (m.sub_code ? '<strong style="color:#00ADB5">' + esc(m.sub_code) + '</strong> · ' : '') +
+                  esc([m.generic, m.brand, m.strength].filter(Boolean).join(' · '));
         var expHtml = !m.expiry ? '<span style="font-size:11.5px;color:#b0bec5">No expiry set</span>'
             : '<span class="expiry-badge ' + m.expiry_state + '">' +
               (m.expiry_state !== 'ok' ? '<i class="fas fa-hourglass-half" style="font-size:9px"></i> ' : '') + esc(m.expiry) + '</span>';
         html += '<tr><td><div class="med-name"><a class="med-link" href="' + URLS.inventory + '?highlight=' + m.id + '" title="Open in Inventory">' + esc(m.name) + '</a>' +
                 (m.s2 ? '<span class="s2-chip"><i class="fas fa-shield-halved" style="font-size:9px"></i> S2</span>' : '') + '</div>' +
-                '<div class="med-sub">' + esc(sub) + '</div></td>' +
+                '<div class="med-sub">' + sub + '</div></td>' +
                 '<td style="color:#64748b">' + esc(m.form || '—') + '</td>' +
                 '<td><span style="font-weight:700;color:' + color + '">' + esc(m.qty) + '</span>' +
                     ((isLocked || isSO) ? '<div class="med-sub">' + esc(m.total) + ' in pharmacy stock</div>'
@@ -1315,7 +1316,7 @@ function debounceFind(q) {
                 } else {
                     box.innerHTML = d.results.map(function(r) {
                         return '<div class="find-item" onclick="goToLoc(' + r.area_id + ',' + r.loc_id + ')">' +
-                               '<div>' + esc(r.name) + '<small>' + esc(r.strength) + ' · ' + esc(r.area) + ' · ' + r.qty + ' pcs' + (r.supply_office ? ' · Supply Office' : '') + (r.locked ? ' · locked' : '') + '</small></div>' +
+                               '<div>' + esc(r.name) + '<small>' + (r.sub_code ? esc(r.sub_code) + ' · ' : '') + esc(r.strength) + ' · ' + esc(r.area) + ' · ' + r.qty + ' pcs' + (r.supply_office ? ' · Supply Office' : '') + (r.locked ? ' · locked' : '') + '</small></div>' +
                                '<span class="find-loc">' + (r.locked ? '<i class="fas fa-lock" style="font-size:9px"></i> ' : '') + esc(r.code) + '</span></div>';
                     }).join('');
                 }
@@ -1570,7 +1571,7 @@ function cmpPaneHtml(p, i, q, commonOnly, presence) {
         var meds = d.medicines || [], units = 0;
         meds.forEach(function(m) { units += Number(m.qty) || 0; });
         var rows = meds.filter(function(m) {
-            if (q && (m.name + ' ' + m.generic + ' ' + m.brand + ' ' + m.strength).toLowerCase().indexOf(q) === -1) return false;
+            if (q && (m.name + ' ' + m.sub_code + ' ' + m.generic + ' ' + m.brand + ' ' + m.strength).toLowerCase().indexOf(q) === -1) return false;
             if (commonOnly && (presence[m.id] || []).length < 2) return false;
             return true;
         });
@@ -1606,7 +1607,7 @@ function cmpPaneHtml(p, i, q, commonOnly, presence) {
                 var dnr = (Number(m.qty) || 0) - (Number(m.rel != null ? m.rel : m.qty) || 0);
                 return '<tr class="' + (others.length ? 'cmp-row-common' : '') + '"><td><div class="med-name">' + esc(m.name) +
                        (m.s2 ? '<span class="s2-chip">S2</span>' : '') + '</div>' +
-                       '<div class="med-sub">' + esc([m.strength, m.form].filter(Boolean).join(' · ')) + '</div>' + where + (also ? '<div>' + also + '</div>' : '') + '</td>' +
+                       '<div class="med-sub">' + (m.sub_code ? '<strong style="color:#00ADB5">' + esc(m.sub_code) + '</strong> · ' : '') + esc([m.strength, m.form].filter(Boolean).join(' · ')) + '</div>' + where + (also ? '<div>' + also + '</div>' : '') + '</td>' +
                        '<td><span style="font-weight:700;color:' + color + '">' + esc(m.qty) + '</span>' + (dnr > 0 ? '<div class="med-sub">' + dnr + ' on hold</div>' : '') + '</td>' +
                        '<td>' + cmpExpiry(m) + '</td></tr>';
             }).join('') + '</tbody></table>';
@@ -1634,7 +1635,7 @@ function openStockIn(medId) {
     if (medId) {
         var r = null;
         state.medsRows.forEach(function(x) { if (x.id === medId) r = x; });
-        if (r) siChoose({ pk: r.id, medicine_name: r.name, strength: r.strength, dosage_form: r.form, supplier_id: '', purchase_price: '' });
+        if (r) siChoose({ pk: r.id, sub_code: r.sub_code, medicine_name: r.name, strength: r.strength, dosage_form: r.form, supplier_id: '', purchase_price: '' });
     }
     closeModal('medsModal');
     openModal('stockInModal');
@@ -1655,7 +1656,7 @@ function siSearch(q) {
                 SI.results = d.results || [];
                 box.innerHTML = SI.results.length ? SI.results.map(function(m, i) {
                     return '<div class="si-item" onclick="siPick(' + i + ')">' + esc(m.medicine_name) + ' <span style="color:#94a3b8">' + esc(m.strength) + '</span>' +
-                           '<small>' + esc(m.label) + ' · ' + esc(m.stock_quantity) + ' in pharmacy stock</small></div>';
+                           '<small>' + (m.sub_code ? '<strong style="color:#00ADB5">' + esc(m.sub_code) + '</strong> · ' : '') + esc(m.label) + ' · ' + esc(m.stock_quantity) + ' in pharmacy stock</small></div>';
                 }).join('') : '<div class="find-empty">No medicines found for “' + esc(q) + '”.</div>';
                 box.classList.add('open');
             })
@@ -1670,7 +1671,7 @@ function siChoose(m) {
     SI.pickedPk = null;
     document.getElementById('siResults').classList.remove('open');
     document.getElementById('siSearch').parentNode.style.display = 'none';
-    document.getElementById('siChosenTxt').innerHTML = '<strong>' + esc(m.medicine_name) + '</strong> ' + esc(m.strength || '') + (m.dosage_form ? ' · ' + esc(m.dosage_form) : '');
+    document.getElementById('siChosenTxt').innerHTML = (m.sub_code ? '<span style="color:#00ADB5;font-weight:700">' + esc(m.sub_code) + '</span> · ' : '') + '<strong>' + esc(m.medicine_name) + '</strong> ' + esc(m.strength || '') + (m.dosage_form ? ' · ' + esc(m.dosage_form) : '');
     document.getElementById('siChosen').classList.add('show');
     if (m.supplier_id) document.getElementById('siSupplier').value = m.supplier_id;
     if (m.purchase_price && m.purchase_price !== '0.00') document.getElementById('siPrice').value = m.purchase_price;

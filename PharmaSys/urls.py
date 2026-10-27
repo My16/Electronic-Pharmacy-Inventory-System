@@ -19,6 +19,10 @@ urlpatterns = [
     path('inventory/barcode/',               views.inventory_barcode_lookup,name='inventory_barcode'),
     path('inventory/stock-adjust/<int:pk>/', views.inventory_stock_adjust,  name='inventory_stock_adjust'),
     path('inventory/batch/<int:pk>/dnr/', views.batch_dnr_view, name='batch_dnr'),
+    path('inventory/stock-codes/search/',            views.stock_code_search_ajax, name='stock_code_search_ajax'),
+    path('inventory/stock-codes/create/',            views.stock_code_create,      name='stock_code_create'),
+    path('inventory/stock-codes/<int:pk>/update/',   views.stock_code_update,      name='stock_code_update'),
+    path('inventory/stock-codes/<int:pk>/delete/',   views.stock_code_delete,      name='stock_code_delete'),
 
     # ── Medicine search (AJAX) ────────────────────────────────────────────────
     path('api/medicine-search/',    views.medicine_search_ajax,  name='medicine_search_ajax'),

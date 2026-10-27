@@ -404,7 +404,7 @@
             <div class="search-wrap">
                 <div class="search-box">
                     <i class="fas fa-search"></i>
-                    <input type="text" id="medSearch" placeholder="Search medicine name, generic, strength…"
+                    <input type="text" id="medSearch" placeholder="Search name, stock code, generic, strength…"
                            oninput="debounceSearch(this.value)" autocomplete="off">
                 </div>
                 <button class="btn-scan-barcode" onclick="openScanner()">
@@ -1110,7 +1110,7 @@ function renderMedGrid(results) {
                 ${m.is_s2_regulated ? '<span style="display:inline-flex;align-items:center;gap:3px;background:rgba(124,58,237,.12);color:#7c3aed;border-radius:20px;padding:1px 6px;font-size:9px;font-weight:700;margin-left:4px;vertical-align:middle;"><i class="fas fa-shield-halved" style="font-size:8px;"></i> S2</span>' : ''}
             </div>
             ${m.brand_name ? `<div class="med-card-brand">${escHtml(m.brand_name)}</div>` : ''}
-            <div class="med-card-generic">${escHtml(m.generic_name)}</div>
+            <div class="med-card-generic">${m.sub_code ? '<strong style="color:#00ADB5">' + escHtml(m.sub_code) + '</strong> · ' : ''}${escHtml(m.generic_name)}</div>
             <div class="med-card-form">${escHtml(m.strength)} · ${escHtml(m.dosage_form)}</div>
             ${meta ? `<div class="med-card-meta">${escHtml(meta)}</div>` : ''}
             <div class="med-card-bottom">
@@ -1138,7 +1138,7 @@ function addToCart(m) {
         existing.qty++;
     } else {
         cart.push({
-            pk: m.pk, name: m.medicine_name, brand: m.brand_name || '',
+            pk: m.pk, name: m.medicine_name, brand: m.brand_name || '', subCode: m.sub_code || '',
             strength: m.strength, dosage: m.dosage_form,
             price: parseFloat(m.selling_price), qty: 1,
             stock: m.stock_quantity, isS2: !!m.is_s2_regulated
@@ -1250,7 +1250,7 @@ function renderCart() {
         <div class="cart-item" data-pk="${item.pk}">
             <div class="cart-item-info">
                 <div class="cart-item-name">${escHtml(item.name)} ${escHtml(item.strength)}</div>
-                <div class="cart-item-sub">${item.brand ? escHtml(item.brand) + ' · ' : ''}${escHtml(item.dosage)}</div>
+                <div class="cart-item-sub">${item.subCode ? '<strong style="color:#00ADB5">' + escHtml(item.subCode) + '</strong> · ' : ''}${item.brand ? escHtml(item.brand) + ' · ' : ''}${escHtml(item.dosage)}</div>
                 <div class="cart-item-price">₱${item.price.toFixed(2)} / unit</div>
             </div>
             <div class="cart-qty-ctrl">
@@ -1395,7 +1395,7 @@ function renderReceipt(r) {
         <div class="receipt-items">
             ${r.items.map(item => `
             <div class="receipt-item">
-                <div class="receipt-item-name">${item.name}${item.brand ? ' (' + item.brand + ')' : ''} ${item.strength}</div>
+                <div class="receipt-item-name">${item.sub_code ? '[' + item.sub_code + '] ' : ''}${item.name}${item.brand ? ' (' + item.brand + ')' : ''} ${item.strength}</div>
                 <div class="receipt-item-detail">
                     <span>${item.qty} x ₱${parseFloat(item.unit_price).toFixed(2)}</span>
                     <span>₱${parseFloat(item.subtotal).toFixed(2)}</span>
