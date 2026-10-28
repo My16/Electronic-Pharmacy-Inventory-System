@@ -4321,9 +4321,11 @@ def _clean_stock_code_payload(request):
 @require(('inventory', 'stock_management'), ajax=True)
 def stock_code_search_ajax(request):
     q  = request.GET.get('q', '').strip()
-    qs = StockCode.objects.prefetch_related(
-        Prefetch('medicines', queryset=Medicine.objects.filter(is_active=True)
-                 .order_by('sub_code'), to_attr='active_variants'))
+    qs = (StockCode.objects
+          .annotate(total_meds=Count('medicines'))
+          .prefetch_related(
+              Prefetch('medicines', queryset=Medicine.objects.filter(is_active=True)
+                       .order_by('sub_code'), to_attr='active_variants')))
     if q:
         qs = qs.filter(Q(code__icontains=q) | Q(generic_name__icontains=q))
     limit = 300 if request.GET.get('all') else 20
@@ -4331,7 +4333,8 @@ def stock_code_search_ajax(request):
     for s in qs.order_by('code')[:limit]:
         results.append({
             'pk': s.pk, 'code': s.code, 'generic_name': s.generic_name,
-            'count': len(s.active_variants), 'next_sub': s.next_sub_code(),
+            'count': len(s.active_variants), 'total': s.total_meds,
+            'next_sub': s.next_sub_code(),
             'variants': [{'sub_code': m.sub_code or '—', 'name': m.medicine_name,
                           'strength': m.strength, 'form': m.get_dosage_form_display()}
                          for m in s.active_variants],
@@ -4391,9 +4394,8 @@ def stock_code_delete(request, pk):
 
 
 
-
 # ─────────────────────────────────────────────────────────────────────────────
-# CATEGORY — AJAX search + create
+# CATEGORY — AJAX search + create + update + delete
 # ─────────────────────────────────────────────────────────────────────────────
 
 @require(('inventory', 'stock_management'), ajax=True)
@@ -4402,14 +4404,26 @@ def category_search_ajax(request):
     qs = MedicineCategory.objects.all()
     if q:
         qs = qs.filter(name__icontains=q)
+    limit = 300 if request.GET.get('all') else 20
+    cats  = list(qs.order_by('name')[:limit])
+    ids   = [c.pk for c in cats]
+
     counts = dict(
-        Medicine.objects.filter(category__isnull=False)
+        Medicine.objects.filter(category_id__in=ids)
         .order_by().values_list('category').annotate(n=Count('id'))
     )
-    limit = 300 if request.GET.get('all') else 20
-    qs = qs.order_by('name')[:limit]
+    variants = {}
+    for m in (Medicine.objects.filter(category_id__in=ids, is_active=True)
+              .order_by('sub_code', 'medicine_name')):
+        variants.setdefault(m.category_id, []).append({
+            'sub_code': m.sub_code or '—', 'name': m.medicine_name,
+            'strength': m.strength, 'form': m.get_dosage_form_display(),
+        })
+
     return JsonResponse({'results': [
-        {'pk': c.pk, 'name': c.name, 'count': counts.get(c.pk, 0)} for c in qs
+        {'pk': c.pk, 'name': c.name,
+         'count': counts.get(c.pk, 0),
+         'variants': variants.get(c.pk, [])} for c in cats
     ]})
 
 
@@ -4462,7 +4476,6 @@ def category_delete_ajax(request, pk):
     name = cat.name
     cat.delete()
     return JsonResponse({'success': True, 'message': f'Category "{name}" deleted.'})
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # BATCH MANAGEMENT — AJAX edit + soft-delete

@@ -909,6 +909,21 @@ tr.group-row.open .grp-chev{transform:rotate(90deg)}
             <button class="modal-close" onclick="closeModal('catModal')"><i class="fas fa-xmark"></i></button>
         </div>
         <div class="modal-body">
+            {% if can_manage %}
+            <div class="section-label">Add / Edit Category</div>
+            <input type="hidden" id="cm_edit_pk">
+            <div class="form-group">
+                <label class="form-label">Category Name *</label>
+                <input type="text" id="cm_name" class="form-control" maxlength="100" placeholder="e.g. Antibiotics"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();cmSave();}">
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+                <button type="button" class="btn-cancel" id="cm_cancel_edit" style="display:none" onclick="cmResetForm()">Cancel edit</button>
+                <button type="button" class="btn-submit" id="cm_save_btn" onclick="cmSave()">Add Category</button>
+            </div>
+            {% endif %}
+
+            <div class="section-label">Existing Categories</div>
             <div class="search-box" style="margin-bottom:10px;"><i class="fas fa-search"></i>
                 <input type="text" id="cm_filter" placeholder="Filter…" style="width:100%" oninput="cmLoadList()"></div>
             <table class="data-table">
@@ -947,6 +962,26 @@ tr.group-row.open .grp-chev{transform:rotate(90deg)}
                 <thead><tr><th>Code</th><th>Generic Name</th><th>Medicines</th><th>Actions</th></tr></thead>
                 <tbody id="sc_list"></tbody>
             </table>
+        </div>
+    </div>
+</div>
+
+<!-- ── SHARED DELETE CONFIRM MODAL (Category / Stock Code) ── -->
+<div class="modal-overlay" id="delModal">
+    <div class="modal modal-sm">
+        <div class="delete-body">
+            <div class="delete-icon"><i class="fas fa-trash-can"></i></div>
+            <div class="delete-title" id="del_title">Delete</div>
+            <p class="delete-msg" id="del_msg"></p>
+            <div class="info-note" id="del_warn" style="display:none;text-align:left;margin:12px 0 0;">
+                <i class="fas fa-triangle-exclamation"></i><span id="del_warn_txt"></span>
+            </div>
+        </div>
+        <div class="modal-footer" style="justify-content:center;gap:12px;">
+            <button type="button" class="btn-cancel" onclick="closeModal('delModal')">Cancel</button>
+            <button type="button" class="btn-danger" id="del_confirm" onclick="delConfirm()">
+                <i class="fas fa-trash-can" style="margin-right:5px"></i>Yes, Delete
+            </button>
         </div>
     </div>
 </div>
@@ -1454,16 +1489,37 @@ function scSave(){
 }
 function scDelete(i){
     var s = window._scList[i];
-    if (!confirm('Delete Stock Code ' + s.code + ' (' + s.generic_name + ')?')) return;
-    fetch(URLS.stock_code_delete.replace('__PK__', s.pk), { method:'POST', headers:{'X-CSRFToken':CSRF} })
-      .then(function(r){ return r.json(); })
-      .then(function(d){ if (d.success){ showToast(d.message); scLoadList(); } else showToast(d.error||'Failed.','error'); })
-      .catch(function(){ showToast('Network error.','error'); });
+    var inactive = s.total - s.count;
+    openDelModal({
+        title:   'Delete Stock Code',
+        msg:     'Delete Stock Code <strong>' + _esc(s.code) + '</strong> (' + _esc(s.generic_name) + ')? This cannot be undone.',
+        warn:    s.total ? s.total + ' medicine(s) still use this Stock Code'
+                   + (inactive ? ' (' + inactive + ' removed)' : '')
+                   + '. Reassign them first.' : '',
+        blocked: s.total > 0,
+        run: function(){
+            fetch(URLS.stock_code_delete.replace('__PK__', s.pk), { method:'POST', headers:{'X-CSRFToken':CSRF} })
+              .then(function(r){ return r.json(); })
+              .then(function(d){ if (d.success){ showToast(d.message); scLoadList(); } else showToast(d.error||'Failed.','error'); })
+              .catch(function(){ showToast('Network error.','error'); });
+        }
+    });
 }
 
-// ── Category manager (rename / delete) ────────────────────
+// ── Category manager (add / edit / delete) ────────────────
 var cmChanged = false, cmList = [];
-function openCategories(){ cmChanged = false; document.getElementById('cm_filter').value=''; cmLoadList(); openModal('catModal'); }
+function openCategories(){
+    cmChanged = false; cmResetForm();
+    document.getElementById('cm_filter').value = '';
+    cmLoadList(); openModal('catModal');
+}
+function cmResetForm(){
+    var pk = document.getElementById('cm_edit_pk');
+    if (!pk) return;                                   // user has no edit permission
+    pk.value = ''; document.getElementById('cm_name').value = '';
+    document.getElementById('cm_save_btn').textContent = 'Add Category';
+    document.getElementById('cm_cancel_edit').style.display = 'none';
+}
 function cmLoadList(){
     var q = document.getElementById('cm_filter').value.trim();
     fetch(URLS.category_search + '?all=1&q=' + encodeURIComponent(q))
@@ -1471,44 +1527,90 @@ function cmLoadList(){
       .then(function(data){
         cmList = data.results;
         document.getElementById('cm_list').innerHTML = cmList.length ? cmList.map(function(c,i){
-            return '<tr id="cm-row-'+i+'">'
-              + '<td id="cm-name-'+i+'"><strong>'+_esc(c.name)+'</strong></td>'
-              + '<td>'+c.count+'</td>'
-              + '<td><div class="action-btns">'
-                {% if can_manage %}+ '<button class="btn-icon edit" title="Rename" onclick="cmEdit('+i+')"><i class="fas fa-pen-to-square"></i></button>'{% endif %}
+            var vs = c.variants || [];
+            var detail = vs.length ? vs.map(function(v){
+                return '<div style="padding:3px 0"><strong>'+_esc(v.sub_code)+'</strong> — '+_esc(v.name)+' '+_esc(v.strength)+' ('+_esc(v.form)+')</div>';
+            }).join('') : '<em style="color:#94a3b8">No medicines yet.</em>';
+            return '<tr style="cursor:pointer" onclick="cmToggle('+i+')">'
+              + '<td><strong>'+_esc(c.name)+'</strong></td>'
+              + '<td>'+c.count+' <i class="fas fa-chevron-down" style="font-size:10px;color:#94a3b8"></i></td>'
+              + '<td><div class="action-btns" onclick="event.stopPropagation()">'
+                {% if can_manage %}+ '<button class="btn-icon edit" title="Edit" onclick="cmEdit('+i+')"><i class="fas fa-pen-to-square"></i></button>'{% endif %}
                 {% if can_admin %}+ '<button class="btn-icon delete" title="Delete" onclick="cmDelete('+i+')"><i class="fas fa-trash-can"></i></button>'{% endif %}
-              + '</div></td></tr>';
-        }).join('') : '<tr><td colspan="3" style="text-align:center;color:#b0bec5;padding:14px">No categories found.</td></tr>';
+              + '</div></td></tr>'
+              + '<tr id="cmv-'+i+'" style="display:none"><td colspan="3" style="background:#f8fafc;font-size:12px">'+detail+'</td></tr>';
+        }).join('') : '<tr><td colspan="3" style="text-align:center;color:#b0bec5;padding:14px">No categories yet.</td></tr>';
       });
+}
+function cmToggle(i){
+    var r = document.getElementById('cmv-'+i);
+    r.style.display = r.style.display === 'none' ? 'table-row' : 'none';
 }
 function cmEdit(i){
     var c = cmList[i];
-    document.getElementById('cm-name-'+i).innerHTML =
-        '<input type="text" class="form-control" id="cm-input-'+i+'" value="'+_esc(c.name).replace(/"/g,'&quot;')+'" '
-      + 'onkeydown="if(event.key===\'Enter\')cmSave('+i+');if(event.key===\'Escape\')cmLoadList()">';
-    var inp = document.getElementById('cm-input-'+i); inp.focus(); inp.select();
-    document.querySelector('#cm-row-'+i+' .action-btns').innerHTML =
-        '<button class="btn-icon edit" title="Save" onclick="cmSave('+i+')"><i class="fas fa-check"></i></button>'
-      + '<button class="btn-icon delete" title="Cancel" onclick="cmLoadList()"><i class="fas fa-xmark"></i></button>';
+    document.getElementById('cm_edit_pk').value = c.pk;
+    document.getElementById('cm_name').value = c.name;
+    document.getElementById('cm_save_btn').textContent = 'Save Changes';
+    document.getElementById('cm_cancel_edit').style.display = 'inline-block';
+    document.getElementById('cm_name').focus();
 }
-function cmSave(i){
-    var c = cmList[i], name = document.getElementById('cm-input-'+i).value.trim();
-    fetch(URLS.category_update.replace('__PK__', c.pk), {
-        method:'POST', headers:{'X-CSRFToken':CSRF,'Content-Type':'application/json'},
+function cmSave(){
+    var pk   = document.getElementById('cm_edit_pk').value;
+    var name = document.getElementById('cm_name').value.trim();
+    if (!name){ showToast('Category name cannot be empty.', 'error'); return; }
+    var url = pk ? URLS.category_update.replace('__PK__', pk) : URLS.category_create;
+    fetch(url, { method:'POST', headers:{'X-CSRFToken':CSRF,'Content-Type':'application/json'},
         body: JSON.stringify({ name: name }) })
       .then(function(r){ return r.json(); })
-      .then(function(d){ if (d.success){ cmChanged = true; showToast(d.message); cmLoadList(); } else showToast(d.error||'Failed.','error'); })
-      .catch(function(){ showToast('Network error.','error'); });
+      .then(function(d){
+        if (!pk && d.existed){ showToast('Category "' + d.name + '" already exists.', 'error'); return; }
+        if (d.success || d.pk){
+            cmChanged = true;
+            showToast(d.message || ('Category "' + d.name + '" added.'));
+            cmResetForm(); cmLoadList();
+        } else showToast(d.error || 'Failed.', 'error');
+      })
+      .catch(function(){ showToast('Network error.', 'error'); });
 }
 function cmDelete(i){
     var c = cmList[i];
-    if (!confirm('Delete category "' + c.name + '"?')) return;
-    fetch(URLS.category_delete.replace('__PK__', c.pk), { method:'POST', headers:{'X-CSRFToken':CSRF} })
-      .then(function(r){ return r.json(); })
-      .then(function(d){ if (d.success){ cmChanged = true; showToast(d.message); cmLoadList(); } else showToast(d.error||'Failed.','error'); })
-      .catch(function(){ showToast('Network error.','error'); });
+    openDelModal({
+        title:   'Delete Category',
+        msg:     'Delete category <strong>' + _esc(c.name) + '</strong>? This cannot be undone.',
+        warn:    c.count ? c.count + ' medicine(s) still use this category. Move them to another category first.' : '',
+        blocked: c.count > 0,
+        run: function(){
+            fetch(URLS.category_delete.replace('__PK__', c.pk), { method:'POST', headers:{'X-CSRFToken':CSRF} })
+              .then(function(r){ return r.json(); })
+              .then(function(d){ if (d.success){ cmChanged = true; showToast(d.message); cmLoadList(); } else showToast(d.error||'Failed.','error'); })
+              .catch(function(){ showToast('Network error.', 'error'); });
+        }
+    });
 }
 
+
+// ── Shared delete-confirm modal ───────────────────────────
+var delAction = null;
+function openDelModal(o) {
+    // o = { title, msg (html), warn (text, optional), blocked (bool), run (function) }
+    document.getElementById('del_title').textContent = o.title;
+    document.getElementById('del_msg').innerHTML     = o.msg;
+    var warn = document.getElementById('del_warn');
+    warn.style.display = o.warn ? 'flex' : 'none';
+    document.getElementById('del_warn_txt').textContent = o.warn || '';
+    var btn = document.getElementById('del_confirm');
+    btn.disabled = !!o.blocked;
+    btn.style.opacity = o.blocked ? '.5' : '1';
+    btn.style.cursor  = o.blocked ? 'not-allowed' : 'pointer';
+    delAction = o.run;
+    openModal('delModal');
+}
+function delConfirm() {
+    var run = delAction;
+    delAction = null;
+    closeModal('delModal');
+    if (run) run();
+}
 
 </script>
 {% endblock %}
