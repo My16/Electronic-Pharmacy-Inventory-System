@@ -320,6 +320,7 @@ tr.group-row.open .grp-chev{transform:rotate(90deg)}
             {% endif %}
             <button class="btn-scan" onclick="openScanner()"><i class="fas fa-barcode"></i> Scan</button>
             <button class="btn-scan" onclick="openStockCodes()"><i class="fas fa-hashtag"></i> Stock Codes</button>
+            <button class="btn-scan" onclick="openCategories()"><i class="fas fa-tags"></i> Categories</button>
             {% if can_manage %}
             <button class="btn-add" onclick="openAddModal()"><i class="fas fa-plus"></i> Add Medicine</button>
             {% endif %}
@@ -900,6 +901,24 @@ tr.group-row.open .grp-chev{transform:rotate(90deg)}
     </div>
 </div>
 
+<!-- Category Manager Modal -->
+<div class="modal-overlay" id="catModal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title"><i class="fas fa-tags"></i>Categories</div>
+            <button class="modal-close" onclick="closeModal('catModal')"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <div class="search-box" style="margin-bottom:10px;"><i class="fas fa-search"></i>
+                <input type="text" id="cm_filter" placeholder="Filter…" style="width:100%" oninput="cmLoadList()"></div>
+            <table class="data-table">
+                <thead><tr><th>Category</th><th>Medicines</th><th>Actions</th></tr></thead>
+                <tbody id="cm_list"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
 <!-- Stock Code Modal -->
 <div class="modal-overlay" id="scModal">
     <div class="modal">
@@ -950,6 +969,8 @@ const URLS = {
     stock_code_create: "{% url 'stock_code_create' %}",
     stock_code_update: "{% url 'stock_code_update' pk=0 %}".replace('/0/', '/__PK__/'),
     stock_code_delete: "{% url 'stock_code_delete' pk=0 %}".replace('/0/', '/__PK__/'),
+    category_update:   "{% url 'category_update_ajax' pk=0 %}".replace('/0/', '/__PK__/'),
+    category_delete:   "{% url 'category_delete_ajax' pk=0 %}".replace('/0/', '/__PK__/'),
 };
 const CSRF = '{{ csrf_token }}';
 
@@ -970,6 +991,7 @@ function closeModal(id) {
     if (id === 'editModal') catClear('edit');
     if (id === 'addModal')  scClear('add');
     if (id === 'editModal') scClear('edit');
+    if (id === 'catModal' && cmChanged) window.location.reload();
 }
 document.querySelectorAll('.modal-overlay').forEach(function(o) {
     o.addEventListener('click', function(e) {
@@ -977,6 +999,7 @@ document.querySelectorAll('.modal-overlay').forEach(function(o) {
             o.classList.remove('open');
             if (o.id === 'addModal')  catClear('add');
             if (o.id === 'editModal') catClear('edit');
+            if (o.id === 'catModal' && cmChanged) window.location.reload();
         }
     });
 });
@@ -1435,6 +1458,54 @@ function scDelete(i){
     fetch(URLS.stock_code_delete.replace('__PK__', s.pk), { method:'POST', headers:{'X-CSRFToken':CSRF} })
       .then(function(r){ return r.json(); })
       .then(function(d){ if (d.success){ showToast(d.message); scLoadList(); } else showToast(d.error||'Failed.','error'); })
+      .catch(function(){ showToast('Network error.','error'); });
+}
+
+// ── Category manager (rename / delete) ────────────────────
+var cmChanged = false, cmList = [];
+function openCategories(){ cmChanged = false; document.getElementById('cm_filter').value=''; cmLoadList(); openModal('catModal'); }
+function cmLoadList(){
+    var q = document.getElementById('cm_filter').value.trim();
+    fetch(URLS.category_search + '?all=1&q=' + encodeURIComponent(q))
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        cmList = data.results;
+        document.getElementById('cm_list').innerHTML = cmList.length ? cmList.map(function(c,i){
+            return '<tr id="cm-row-'+i+'">'
+              + '<td id="cm-name-'+i+'"><strong>'+_esc(c.name)+'</strong></td>'
+              + '<td>'+c.count+'</td>'
+              + '<td><div class="action-btns">'
+                {% if can_manage %}+ '<button class="btn-icon edit" title="Rename" onclick="cmEdit('+i+')"><i class="fas fa-pen-to-square"></i></button>'{% endif %}
+                {% if can_admin %}+ '<button class="btn-icon delete" title="Delete" onclick="cmDelete('+i+')"><i class="fas fa-trash-can"></i></button>'{% endif %}
+              + '</div></td></tr>';
+        }).join('') : '<tr><td colspan="3" style="text-align:center;color:#b0bec5;padding:14px">No categories found.</td></tr>';
+      });
+}
+function cmEdit(i){
+    var c = cmList[i];
+    document.getElementById('cm-name-'+i).innerHTML =
+        '<input type="text" class="form-control" id="cm-input-'+i+'" value="'+_esc(c.name).replace(/"/g,'&quot;')+'" '
+      + 'onkeydown="if(event.key===\'Enter\')cmSave('+i+');if(event.key===\'Escape\')cmLoadList()">';
+    var inp = document.getElementById('cm-input-'+i); inp.focus(); inp.select();
+    document.querySelector('#cm-row-'+i+' .action-btns').innerHTML =
+        '<button class="btn-icon edit" title="Save" onclick="cmSave('+i+')"><i class="fas fa-check"></i></button>'
+      + '<button class="btn-icon delete" title="Cancel" onclick="cmLoadList()"><i class="fas fa-xmark"></i></button>';
+}
+function cmSave(i){
+    var c = cmList[i], name = document.getElementById('cm-input-'+i).value.trim();
+    fetch(URLS.category_update.replace('__PK__', c.pk), {
+        method:'POST', headers:{'X-CSRFToken':CSRF,'Content-Type':'application/json'},
+        body: JSON.stringify({ name: name }) })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if (d.success){ cmChanged = true; showToast(d.message); cmLoadList(); } else showToast(d.error||'Failed.','error'); })
+      .catch(function(){ showToast('Network error.','error'); });
+}
+function cmDelete(i){
+    var c = cmList[i];
+    if (!confirm('Delete category "' + c.name + '"?')) return;
+    fetch(URLS.category_delete.replace('__PK__', c.pk), { method:'POST', headers:{'X-CSRFToken':CSRF} })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if (d.success){ cmChanged = true; showToast(d.message); cmLoadList(); } else showToast(d.error||'Failed.','error'); })
       .catch(function(){ showToast('Network error.','error'); });
 }
 

@@ -23,6 +23,8 @@ urlpatterns = [
     path('inventory/stock-codes/create/',            views.stock_code_create,      name='stock_code_create'),
     path('inventory/stock-codes/<int:pk>/update/',   views.stock_code_update,      name='stock_code_update'),
     path('inventory/stock-codes/<int:pk>/delete/',   views.stock_code_delete,      name='stock_code_delete'),
+    path('category/<int:pk>/update/', views.category_update_ajax, name='category_update_ajax'),
+    path('category/<int:pk>/delete/', views.category_delete_ajax, name='category_delete_ajax'),
 
     # ── Medicine search (AJAX) ────────────────────────────────────────────────
     path('api/medicine-search/',    views.medicine_search_ajax,  name='medicine_search_ajax'),

@@ -4402,8 +4402,15 @@ def category_search_ajax(request):
     qs = MedicineCategory.objects.all()
     if q:
         qs = qs.filter(name__icontains=q)
-    qs = qs.order_by('name')[:20]
-    return JsonResponse({'results': [{'pk': c.pk, 'name': c.name} for c in qs]})
+    counts = dict(
+        Medicine.objects.filter(category__isnull=False)
+        .order_by().values_list('category').annotate(n=Count('id'))
+    )
+    limit = 300 if request.GET.get('all') else 20
+    qs = qs.order_by('name')[:limit]
+    return JsonResponse({'results': [
+        {'pk': c.pk, 'name': c.name, 'count': counts.get(c.pk, 0)} for c in qs
+    ]})
 
 
 @require('inventory', 'edit', ajax=True)
@@ -4422,6 +4429,39 @@ def category_create_ajax(request):
         return JsonResponse({'pk': existing.pk, 'name': existing.name, 'existed': True})
     category = MedicineCategory.objects.create(name=name)
     return JsonResponse({'pk': category.pk, 'name': category.name, 'existed': False})
+
+
+@require('inventory', 'edit', ajax=True)
+@require_POST
+def category_update_ajax(request, pk):
+    cat = get_object_or_404(MedicineCategory, pk=pk)
+    try:
+        data = json.loads(request.body or b'{}')
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'Invalid data.'}, status=400)
+    name = str(data.get('name', '') or '').strip()
+    if not name:
+        return JsonResponse({'error': 'Category name cannot be empty.'}, status=400)
+    if MedicineCategory.objects.filter(name__iexact=name).exclude(pk=pk).exists():
+        return JsonResponse({'error': f'Category "{name}" already exists.'}, status=400)
+    cat.name = name
+    cat.save()
+    return JsonResponse({'success': True, 'pk': cat.pk, 'name': cat.name,
+                         'message': f'Category renamed to "{cat.name}".'})
+
+
+@require(level='admin', ajax=True)
+@require_POST
+def category_delete_ajax(request, pk):
+    cat = get_object_or_404(MedicineCategory, pk=pk)
+    n = Medicine.objects.filter(category=cat).count()
+    if n:
+        return JsonResponse(
+            {'error': f'Cannot delete "{cat.name}": {n} medicine(s) still use it. '
+                      'Move them to another category first.'}, status=400)
+    name = cat.name
+    cat.delete()
+    return JsonResponse({'success': True, 'message': f'Category "{name}" deleted.'})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
