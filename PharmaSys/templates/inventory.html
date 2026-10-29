@@ -218,6 +218,48 @@ tr.group-row.open .grp-chev{transform:rotate(90deg)}
 .grp-meta{font-size:11.5px;color:#78909c}
 
 
+/* ── Camera scan button + field wrappers ───────────── */
+.cam-btn{width:30px;height:30px;border:none;border-radius:7px;background:rgba(0,173,181,.12);color:#00ADB5;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;transition:background .15s,transform .15s}
+.cam-btn:hover{background:rgba(0,173,181,.25);transform:translateY(-1px)}
+.search-box.has-cam input{padding-right:42px}
+.search-box .cam-btn{position:absolute;right:4px;top:50%;transform:translateY(-50%)}
+.search-box .cam-btn:hover{transform:translateY(-50%) scale(1.06)}
+.input-cam{position:relative;display:flex;align-items:center}
+.input-cam .form-control{padding-right:42px}
+.input-cam .cam-btn{position:absolute;right:4px}
+.scan-ok{animation:scanOk 1.1s ease}
+@keyframes scanOk{0%{box-shadow:0 0 0 0 rgba(34,197,94,.6);border-color:#16a34a;background:#dcfce7}
+  60%{box-shadow:0 0 0 7px rgba(34,197,94,0);border-color:#16a34a;background:#dcfce7}100%{box-shadow:none}}
+
+/* ── Scanner viewfinder + confirmation effects ─────── */
+.scanner-box{width:min(420px,94vw)}
+.scanner-head-actions{display:flex;gap:6px}
+.scanner-view{position:relative;border-radius:12px;overflow:hidden;background:#0d1b2a;min-height:220px}
+#scannerVideo{display:block;width:100%;height:260px;object-fit:cover;border-radius:0}
+#scannerVideo.mirror{transform:scaleX(-1)}
+.scan-frame{position:absolute;inset:18% 12%;border-radius:10px;pointer-events:none;
+  background:
+   linear-gradient(#00ADB5,#00ADB5) top left/22px 3px,linear-gradient(#00ADB5,#00ADB5) top left/3px 22px,
+   linear-gradient(#00ADB5,#00ADB5) top right/22px 3px,linear-gradient(#00ADB5,#00ADB5) top right/3px 22px,
+   linear-gradient(#00ADB5,#00ADB5) bottom left/22px 3px,linear-gradient(#00ADB5,#00ADB5) bottom left/3px 22px,
+   linear-gradient(#00ADB5,#00ADB5) bottom right/22px 3px,linear-gradient(#00ADB5,#00ADB5) bottom right/3px 22px;
+  background-repeat:no-repeat;box-shadow:0 0 0 999px rgba(13,27,42,.38);transition:all .2s}
+.scan-line{position:absolute;left:4%;right:4%;height:2px;background:linear-gradient(90deg,transparent,#00ADB5,transparent);
+  box-shadow:0 0 8px #00ADB5;animation:scanSweep 1.8s ease-in-out infinite}
+@keyframes scanSweep{0%,100%{top:6%}50%{top:92%}}
+.scan-flash{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+  background:rgba(22,163,74,.88);color:#fff;text-align:center;padding:12px}
+.scan-flash i{font-size:54px;animation:scanPop .45s cubic-bezier(.34,1.56,.64,1) both}
+.scan-flash span{font-size:13px;font-weight:700;letter-spacing:.5px;font-family:monospace;word-break:break-all}
+.scan-flash small{font-size:11.5px;opacity:.9}
+@keyframes scanPop{from{transform:scale(.2);opacity:0}to{transform:scale(1);opacity:1}}
+.scanner-box.ok .scan-flash{display:flex}
+.scanner-box.ok .scan-line{display:none}
+.scanner-box.ok{animation:scanBoxPulse .6s ease}
+@keyframes scanBoxPulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.7)}100%{box-shadow:0 0 0 24px rgba(34,197,94,0)}}
+.scanner-box.warn .scan-flash{display:flex;background:rgba(217,119,6,.9)}
+.scanner-box.warn .scan-line{display:none}
+
 </style>
 {% endblock %}
 
@@ -305,9 +347,10 @@ tr.group-row.open .grp-chev{transform:rotate(90deg)}
                 <input type="hidden" name="dosage"   value="{{ dosage_filter }}">
                 <input type="hidden" name="per_page" value="{{ per_page }}">
                 <input type="hidden" name="view" value="{{ view_mode }}">
-                <div class="search-box">
+                <div class="search-box has-cam">
                     <i class="fas fa-search"></i>
-                    <input type="text" name="search" placeholder="Search name, code, barcode…" value="{{ search }}" autocomplete="off" oninput="debounceSearch(this)">
+                    <input type="text" id="searchInput" name="search" placeholder="Search name, code, barcode…" value="{{ search }}" autocomplete="off" oninput="debounceSearch(this)">
+                    <button type="button" class="cam-btn" title="Scan barcode with camera" onclick="openScanner('search','searchInput')"><i class="fas fa-camera"></i></button>
                 </div>
             </form>
             <div class="view-toggle">
@@ -601,18 +644,28 @@ tr.group-row.open .grp-chev{transform:rotate(90deg)}
 </div>
 
 
-<!-- ── Scanner Overlay ─────────────────────────────────── -->
 <div class="scanner-overlay" id="scannerOverlay">
-    <div class="scanner-box">
+    <div class="scanner-box" id="scannerBox">
         <div class="scanner-header">
-            <div class="scanner-title"><i class="fas fa-barcode"></i>Barcode Scanner</div>
-            <button class="modal-close" onclick="closeScanner()"><i class="fas fa-xmark"></i></button>
+            <div class="scanner-title"><i class="fas fa-barcode"></i><span id="scannerTitleText">Barcode Scanner</span></div>
+            <div class="scanner-head-actions">
+                <button type="button" class="cam-btn" id="camSwitchBtn" title="Switch front / back camera" onclick="switchCamera()"><i class="fas fa-camera-rotate"></i></button>
+                <button class="modal-close" onclick="closeScanner()"><i class="fas fa-xmark"></i></button>
+            </div>
         </div>
         <div class="scanner-body">
-            <video id="scannerVideo" autoplay playsinline></video>
-            <div class="scanner-status" id="scannerStatus">Point camera at a barcode…</div>
+            <div class="scanner-view">
+                <video id="scannerVideo" autoplay playsinline muted></video>
+                <div class="scan-frame"><span class="scan-line"></span></div>
+                <div class="scan-flash" id="scanFlash">
+                    <i class="fas fa-circle-check" id="scanFlashIcon"></i>
+                    <span id="scanFlashCode"></span>
+                    <small id="scanFlashMsg"></small>
+                </div>
+            </div>
+            <div class="scanner-status" id="scannerStatus">Starting camera…</div>
             <div class="scanner-manual">
-                <input type="text" id="manualBarcode" placeholder="Or type barcode here" onkeydown="if(event.key==='Enter')lookupBarcode()">
+                <input type="text" id="manualBarcode" placeholder="Or type barcode here" autocomplete="off" onkeydown="if(event.key==='Enter')lookupBarcode()">
                 <button class="btn-scan-submit" onclick="lookupBarcode()"><i class="fas fa-search"></i></button>
             </div>
         </div>
@@ -678,7 +731,12 @@ tr.group-row.open .grp-chev{transform:rotate(90deg)}
                 <div class="form-grid">
                     <div class="form-group"><label class="form-label">Selling Price (₱)</label><input type="number" name="selling_price" class="form-control" step="0.01" min="0" value="0.00"></div>
                     <div class="form-group"><label class="form-label">Reorder Level</label><input type="number" name="reorder_level" class="form-control" min="0" value="10"></div>
-                    <div class="form-group"><label class="form-label">Barcode</label><input type="text" name="barcode" id="add_barcode" class="form-control"></div>
+                    <div class="form-group"><label class="form-label">Barcode</label>
+                        <div class="input-cam">
+                            <input type="text" name="barcode" id="add_barcode" class="form-control" autocomplete="off" onkeydown="barcodeKey(event)">
+                            <button type="button" class="cam-btn" title="Scan with camera" onclick="openScanner('field','add_barcode')"><i class="fas fa-camera"></i></button>
+                        </div>
+                    </div>
                     <div class="form-group"><label class="form-label">Storage Location *</label><select name="location" id="add_location" class="form-control" required><option value="" disabled selected>— Select location —</option>{% for a in storage_areas %}{% if a.choices %}<optgroup label="{{ a.name }}">{% for l in a.choices %}<option value="{{ l.pk }}"{% if l.is_locked %} disabled{% endif %}>{{ l.code }}{% if l.name and l.name != l.code %} — {{ l.name }}{% endif %}{% if l.is_supply_office %} (Supply Office){% endif %}{% if l.is_locked %} (locked){% endif %}</option>{% endfor %}</optgroup>{% endif %}{% endfor %}</select></div>
                     <div class="form-group" style="grid-column:span 2;">
                         <label class="form-label">S2 Regulation</label>
@@ -771,7 +829,12 @@ tr.group-row.open .grp-chev{transform:rotate(90deg)}
                 <div class="form-grid">
                     <div class="form-group"><label class="form-label">Selling Price (₱)</label><input type="number" name="selling_price" id="e_selling_price" class="form-control" step="0.01" min="0"></div>
                     <div class="form-group"><label class="form-label">Reorder Level</label><input type="number" name="reorder_level" id="e_reorder_level" class="form-control" min="0"></div>
-                    <div class="form-group"><label class="form-label">Barcode</label><input type="text" name="barcode" id="e_barcode" class="form-control"></div>
+                    <div class="form-group"><label class="form-label">Barcode</label>
+                        <div class="input-cam">
+                            <input type="text" name="barcode" id="e_barcode" class="form-control" autocomplete="off" onkeydown="barcodeKey(event)">
+                            <button type="button" class="cam-btn" title="Scan with camera" onclick="openScanner('field','e_barcode')"><i class="fas fa-camera"></i></button>
+                        </div>
+                    </div>
                     <div class="form-group"><label class="form-label">Storage Location *</label><select name="location" id="e_location" class="form-control" required><option value="" disabled>— Select location —</option>{% for a in storage_areas %}{% if a.choices %}<optgroup label="{{ a.name }}">{% for l in a.choices %}<option value="{{ l.pk }}">{{ l.code }}{% if l.name and l.name != l.code %} — {{ l.name }}{% endif %}{% if l.is_supply_office %} (Supply Office){% endif %}{% if l.is_locked %} (locked){% endif %}</option>{% endfor %}</optgroup>{% endif %}{% endfor %}</select></div>
                     <div class="form-group" style="grid-column:span 2;">
                         <label class="form-label">S2 Regulation</label>
@@ -1262,61 +1325,218 @@ function debounceSearch(input) {
     searchTimer = setTimeout(function() { document.getElementById('searchForm').submit(); }, 500);
 }
 
-// ── Barcode Scanner ───────────────────────────────────────
-var codeReader = null;
-function openScanner()  { openModal('scannerOverlay'); startCamera(); }
+// ── Barcode Scanner (camera + scanner gun) ────────────────
+var codeReader = null, scanMode = 'lookup', scanTarget = null,
+    scanFacing = 'environment', scanBusy = false, scanToken = 0, scanAudio = null;
+
+function openScanner(mode, targetId) {
+    scanMode = mode || 'lookup';
+    scanTarget = targetId || null;
+    scanBusy = false;
+    var titles = { lookup: 'Scan Barcode', search: 'Scan to Search', field: 'Scan Barcode' };
+    document.getElementById('scannerTitleText').textContent = titles[scanMode] || 'Barcode Scanner';
+    document.getElementById('scannerBox').classList.remove('ok', 'warn');
+    setScanStatus('Starting camera…', '');
+    openModal('scannerOverlay');
+    startCamera();
+}
 function closeScanner() {
     stopCamera();
     document.getElementById('scannerOverlay').classList.remove('open');
-    document.getElementById('scannerStatus').textContent = 'Point camera at a barcode…';
-    document.getElementById('scannerStatus').className   = 'scanner-status';
+    document.getElementById('scannerBox').classList.remove('ok', 'warn');
     document.getElementById('manualBarcode').value = '';
+    scanBusy = false;
+}
+function setScanStatus(txt, cls) {
+    var el = document.getElementById('scannerStatus');
+    el.textContent = txt;
+    el.className = 'scanner-status' + (cls ? ' ' + cls : '');
 }
 function startCamera() {
-    if (typeof ZXing === 'undefined') {
-        document.getElementById('scannerStatus').textContent = 'Scanner unavailable. Use manual input.';
-        document.getElementById('scannerStatus').className   = 'scanner-status error'; return;
+    stopCamera();
+    var video = document.getElementById('scannerVideo');
+    if (typeof ZXing === 'undefined') { setScanStatus('Scanner library not loaded. Type the barcode below.', 'error'); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setScanStatus(window.isSecureContext ? 'Camera not supported on this browser.'
+                                             : 'Camera needs a secure (HTTPS) connection. Type the barcode below.', 'error');
+        return;
     }
-    codeReader = new ZXing.BrowserMultiFormatReader();
-    codeReader.listVideoInputDevices().then(function(devices) {
-        if (!devices.length) throw new Error('No camera found.');
-        return codeReader.decodeFromVideoDevice(devices[devices.length-1].deviceId,
-            document.getElementById('scannerVideo'),
-            function(result) { if (result) handleScanResult(result.getText()); });
-    }).catch(function(err) {
-        document.getElementById('scannerStatus').textContent = 'Camera: ' + err.message;
-        document.getElementById('scannerStatus').className   = 'scanner-status error';
+    var F = ZXing.BarcodeFormat, hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,
+        [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.CODE_93, F.ITF, F.CODABAR, F.QR_CODE, F.DATA_MATRIX]);
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+
+    codeReader = new ZXing.BrowserMultiFormatReader(hints, 300);
+    video.classList.toggle('mirror', scanFacing === 'user');   // mirror the front camera preview only
+    var token = ++scanToken;
+    codeReader.decodeFromConstraints(
+        { audio: false, video: { facingMode: { ideal: scanFacing }, width: { ideal: 1280 }, height: { ideal: 720 } } },
+        video,
+        function (result) {
+            if (result && !scanBusy && token === scanToken) handleScanResult(result.getText());
+        }
+    ).then(function () {
+        if (token === scanToken) setScanStatus('Point the camera at a barcode… (' + (scanFacing === 'user' ? 'front' : 'back') + ' camera)', '');
+    }).catch(function (err) {
+        var n = err && err.name, msg;
+        if (n === 'NotAllowedError' || n === 'SecurityError') msg = 'Camera permission denied. Allow camera access, or type the barcode below.';
+        else if (n === 'NotFoundError' || n === 'OverconstrainedError') msg = 'No camera found. Type the barcode below.';
+        else if (n === 'NotReadableError') msg = 'Camera is in use by another app.';
+        else msg = 'Camera: ' + ((err && err.message) || 'unavailable');
+        setScanStatus(msg, 'error');
     });
 }
-function stopCamera() { if (codeReader) { codeReader.reset(); codeReader = null; } }
+function stopCamera() {
+    scanToken++;
+    if (codeReader) { try { codeReader.reset(); } catch (e) {} codeReader = null; }
+}
+function switchCamera() {
+    scanFacing = scanFacing === 'environment' ? 'user' : 'environment';
+    scanBusy = false;
+    document.getElementById('scannerBox').classList.remove('ok', 'warn');
+    setScanStatus('Switching to ' + (scanFacing === 'user' ? 'front' : 'back') + ' camera…', '');
+    startCamera();
+}
+
+// ── Feedback: beep + vibration + visual flash ─────────────
+function scanBeep(ok) {
+    try {
+        var C = window.AudioContext || window.webkitAudioContext;
+        if (!C) return;
+        scanAudio = scanAudio || new C();
+        var o = scanAudio.createOscillator(), g = scanAudio.createGain();
+        o.type = 'sine'; o.frequency.value = ok ? 1040 : 280;
+        g.gain.setValueAtTime(0.0001, scanAudio.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.25, scanAudio.currentTime + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, scanAudio.currentTime + (ok ? 0.16 : 0.3));
+        o.connect(g); g.connect(scanAudio.destination);
+        o.start(); o.stop(scanAudio.currentTime + (ok ? 0.17 : 0.31));
+    } catch (e) {}
+    try { if (navigator.vibrate) navigator.vibrate(ok ? 80 : [60, 40, 60]); } catch (e) {}
+}
+function scanFx(kind, code, msg) {   // kind: 'ok' | 'warn'
+    var box = document.getElementById('scannerBox');
+    box.classList.remove('ok', 'warn');
+    void box.offsetWidth;            // restart animation
+    document.getElementById('scanFlashCode').textContent = code || '';
+    document.getElementById('scanFlashMsg').textContent  = msg || '';
+    document.getElementById('scanFlashIcon').className   = kind === 'ok' ? 'fas fa-circle-check' : 'fas fa-triangle-exclamation';
+    box.classList.add(kind);
+    scanBeep(kind === 'ok');
+}
+function flashField(el) {
+    if (!el) return;
+    el.classList.remove('scan-ok'); void el.offsetWidth; el.classList.add('scan-ok');
+    setTimeout(function () { el.classList.remove('scan-ok'); }, 1200);
+}
+
+// ── Handle a decoded / typed barcode ──────────────────────
 function handleScanResult(barcode) {
+    barcode = (barcode || '').trim();
+    if (!barcode || scanBusy) return;
+    scanBusy = true;
     stopCamera();
-    document.getElementById('scannerStatus').textContent = 'Scanning: ' + barcode + '…';
+
+    if (scanMode === 'field') {
+        scanFx('ok', barcode, 'Barcode captured');
+        setScanStatus('✓ Scanned: ' + barcode, 'found');
+        setTimeout(function () {
+            var el = document.getElementById(scanTarget);
+            closeScanner();
+            if (el) { el.value = barcode; el.dispatchEvent(new Event('input', { bubbles: true })); flashField(el); }
+            showToast('Barcode scanned: ' + barcode, 'success');
+        }, 900);
+        return;
+    }
+
+    if (scanMode === 'search') {
+        scanFx('ok', barcode, 'Searching…');
+        setScanStatus('✓ Scanned: ' + barcode, 'found');
+        setTimeout(function () {
+            var el = document.getElementById(scanTarget);
+            if (el) el.value = barcode;
+            closeScanner();
+            document.getElementById('searchForm').submit();
+        }, 800);
+        return;
+    }
+
+    // lookup mode: find the medicine, otherwise offer to add it
+    setScanStatus('Looking up ' + barcode + '…', '');
     fetch(URLS.inventory_barcode + '?barcode=' + encodeURIComponent(barcode))
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
             if (data.found) {
-                document.getElementById('scannerStatus').textContent = '✓ Found: ' + data.medicine_name + ' (' + data.stock_quantity + ' units)';
-                document.getElementById('scannerStatus').className   = 'scanner-status found';
-                setTimeout(function() { closeScanner(); window.location.href = data.highlight_url; }, 1000);
+                scanFx('ok', data.medicine_name, data.stock_quantity + ' units in stock');
+                setScanStatus('✓ Found: ' + data.medicine_name + ' (' + data.stock_quantity + ' units)', 'found');
+                setTimeout(function () { closeScanner(); window.location.href = data.highlight_url; }, 1100);
             } else {
-                document.getElementById('scannerStatus').textContent = 'Barcode not found — opening Add form…';
-                document.getElementById('scannerStatus').className   = 'scanner-status notfound';
-                var bi = document.getElementById('add_barcode');
-                if (bi) bi.value = barcode;
-                setTimeout(function() { closeScanner(); openAddModal(); }, 1200);
+                scanFx('warn', barcode, 'Not in inventory. Opening Add form…');
+                setScanStatus('Barcode not found. Opening Add form…', 'notfound');
+                setTimeout(function () {
+                    closeScanner();
+                    openAddModal();
+                    var bi = document.getElementById('add_barcode');
+                    if (bi) { bi.value = barcode; flashField(bi); }
+                }, 1300);
             }
         })
-        .catch(function() {
-            document.getElementById('scannerStatus').textContent = 'Lookup failed.';
-            document.getElementById('scannerStatus').className   = 'scanner-status error';
+        .catch(function () {
+            scanBusy = false;
+            setScanStatus('Lookup failed. Try again.', 'error');
         });
 }
 function lookupBarcode() {
     var val = document.getElementById('manualBarcode').value.trim();
-    if (val) handleScanResult(val);
+    if (val) { scanBusy = false; handleScanResult(val); }
 }
-document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeScanner(); });
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeScanner(); });
+
+// ── Scanner gun support ───────────────────────────────────
+// Guns type fast and end with Enter. Inside a barcode field, Enter must not submit the form.
+function barcodeKey(e) {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        var el = e.target;
+        if (el.value.trim()) { flashField(el); scanBeep(true); }
+    }
+}
+// Scanning while no field is focused (and no dialog is open) looks the barcode up directly.
+var gunBuf = '', gunLast = 0;
+document.addEventListener('keydown', function (e) {
+    var t = e.target, tag = (t && t.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable) return;
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    if (document.querySelector('.modal-overlay.open, .scanner-overlay.open')) return;
+    var now = Date.now();
+    if (now - gunLast > 80) gunBuf = '';        // human typing is slower, so reset
+    gunLast = now;
+    if (e.key === 'Enter') {
+        if (gunBuf.length >= 4) { e.preventDefault(); var code = gunBuf; gunBuf = ''; gunLookup(code); }
+        gunBuf = '';
+    } else if (e.key.length === 1) {
+        gunBuf += e.key;
+    }
+});
+function gunLookup(code) {
+    fetch(URLS.inventory_barcode + '?barcode=' + encodeURIComponent(code))
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            scanBeep(!!data.found);
+            if (data.found) {
+                showToast('Found: ' + data.medicine_name, 'success');
+                setTimeout(function () { window.location.href = data.highlight_url; }, 500);
+            } else {
+                showToast('Barcode ' + code + ' not found. Opening Add form…', 'error');
+                setTimeout(function () {
+                    openAddModal();
+                    var bi = document.getElementById('add_barcode');
+                    if (bi) { bi.value = code; flashField(bi); }
+                }, 700);
+            }
+        })
+        .catch(function () { showToast('Lookup failed.', 'error'); });
+}
 
 // ── Highlight scroll + auto-expand batch ──────────────────
 document.addEventListener('DOMContentLoaded', function() {
