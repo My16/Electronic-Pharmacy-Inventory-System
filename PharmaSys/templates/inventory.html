@@ -1329,6 +1329,8 @@ function debounceSearch(input) {
 var codeReader = null, scanMode = 'lookup', scanTarget = null,
     scanFacing = 'environment', scanBusy = false, scanToken = 0, scanAudio = null;
 
+var scanStream = null, scanTimer = null, scanDetector = null;
+
 function openScanner(mode, targetId) {
     scanMode = mode || 'lookup';
     scanTarget = targetId || null;
@@ -1352,43 +1354,123 @@ function setScanStatus(txt, cls) {
     el.textContent = txt;
     el.className = 'scanner-status' + (cls ? ' ' + cls : '');
 }
+// Routes a decoded code to the handler. Also turns EAN-13 "0xxxxxxxxxxxx" into the 12-digit UPC-A.
+function scanDeliver(code) {
+    code = String(code || '').trim();
+    if (/^0\d{12}$/.test(code)) code = code.slice(1);
+    handleScanResult(code);
+}
+// UPC-A and EAN-13 are the same code written two ways, so try both.
+function barcodeVariants(c) {
+    var v = [c];
+    if (/^\d{13}$/.test(c) && c.charAt(0) === '0') v.push(c.slice(1));
+    else if (/^\d{12}$/.test(c)) v.push('0' + c);
+    return v;
+}
+function lookupVariants(code) {
+    var list = barcodeVariants(code), i = 0;
+    function next() {
+        return fetch(URLS.inventory_barcode + '?barcode=' + encodeURIComponent(list[i]))
+            .then(function (r) { return r.json(); })
+            .then(function (d) { if (d.found || ++i >= list.length) return d; return next(); });
+    }
+    return next();
+}
+
+function scanCameraError(err) {
+    var n = err && err.name, msg;
+    if (n === 'NotAllowedError' || n === 'SecurityError') msg = 'Camera permission denied. Allow camera access, or type the barcode below.';
+    else if (n === 'NotFoundError' || n === 'OverconstrainedError') msg = 'No camera found. Type the barcode below.';
+    else if (n === 'NotReadableError') msg = 'Camera is in use by another app.';
+    else msg = 'Camera: ' + ((err && err.message) || 'unavailable');
+    setScanStatus(msg, 'error');
+}
+function scanStatusReady() {
+    setScanStatus('Hold the barcode 10–20 cm away, steady and well lit… (' + (scanFacing === 'user' ? 'front' : 'back') + ' camera)', '');
+}
+
 function startCamera() {
     stopCamera();
     var video = document.getElementById('scannerVideo');
-    if (typeof ZXing === 'undefined') { setScanStatus('Scanner library not loaded. Type the barcode below.', 'error'); return; }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         setScanStatus(window.isSecureContext ? 'Camera not supported on this browser.'
                                              : 'Camera needs a secure (HTTPS) connection. Type the barcode below.', 'error');
         return;
     }
-    var F = ZXing.BarcodeFormat, hints = new Map();
-    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,
-        [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.CODE_93, F.ITF, F.CODABAR, F.QR_CODE, F.DATA_MATRIX]);
-    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-
-    codeReader = new ZXing.BrowserMultiFormatReader(hints, 300);
-    video.classList.toggle('mirror', scanFacing === 'user');   // mirror the front camera preview only
+    video.classList.toggle('mirror', scanFacing === 'user');
     var token = ++scanToken;
-    codeReader.decodeFromConstraints(
-        { audio: false, video: { facingMode: { ideal: scanFacing }, width: { ideal: 1280 }, height: { ideal: 720 } } },
-        video,
-        function (result) {
-            if (result && !scanBusy && token === scanToken) handleScanResult(result.getText());
-        }
-    ).then(function () {
-        if (token === scanToken) setScanStatus('Point the camera at a barcode… (' + (scanFacing === 'user' ? 'front' : 'back') + ' camera)', '');
+    if ('BarcodeDetector' in window) startNativeScan(video, token);   // fast, great with 1D codes
+    else startZxingScan(video, token);                                // fallback
+}
+
+// ── Native BarcodeDetector (Chrome / Edge) ──
+function startNativeScan(video, token) {
+    var want = ['upc_a', 'upc_e', 'ean_13', 'ean_8', 'code_128', 'code_39', 'code_93', 'itf', 'codabar', 'qr_code', 'data_matrix'];
+    var getSup = BarcodeDetector.getSupportedFormats ? BarcodeDetector.getSupportedFormats() : Promise.resolve(want);
+    getSup.then(function (sup) {
+        var use = want.filter(function (f) { return sup.indexOf(f) > -1; });
+        if (!use.length) throw new Error('nodetector');
+        scanDetector = new BarcodeDetector({ formats: use });
+        return navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: { ideal: scanFacing }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+        });
+    }).then(function (stream) {
+        if (token !== scanToken) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+        scanStream = stream;
+        video.srcObject = stream;
+        try {                                   // continuous autofocus where supported
+            var track = stream.getVideoTracks()[0], caps = track.getCapabilities ? track.getCapabilities() : {};
+            if (caps.focusMode && caps.focusMode.indexOf('continuous') > -1)
+                track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
+        } catch (e) {}
+        return video.play();
+    }).then(function () {
+        if (token !== scanToken || !scanStream) return;
+        scanStatusReady();
+        var busy = false;
+        scanTimer = setInterval(function () {
+            if (busy || scanBusy || token !== scanToken || video.readyState < 2) return;
+            busy = true;
+            scanDetector.detect(video).then(function (codes) {
+                busy = false;
+                if (codes.length && !scanBusy && token === scanToken) scanDeliver(codes[0].rawValue);
+            }).catch(function () { busy = false; });
+        }, 120);
     }).catch(function (err) {
-        var n = err && err.name, msg;
-        if (n === 'NotAllowedError' || n === 'SecurityError') msg = 'Camera permission denied. Allow camera access, or type the barcode below.';
-        else if (n === 'NotFoundError' || n === 'OverconstrainedError') msg = 'No camera found. Type the barcode below.';
-        else if (n === 'NotReadableError') msg = 'Camera is in use by another app.';
-        else msg = 'Camera: ' + ((err && err.message) || 'unavailable');
-        setScanStatus(msg, 'error');
+        if (token !== scanToken) return;
+        if (err && err.message === 'nodetector') { startZxingScan(video, token); return; }
+        scanCameraError(err);
     });
 }
+
+// ── ZXing fallback (Safari / Firefox) ──
+function startZxingScan(video, token) {
+    if (typeof ZXing === 'undefined') { setScanStatus('Scanner library not loaded. Type the barcode below.', 'error'); return; }
+    var F = ZXing.BarcodeFormat, hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,
+        [F.UPC_A, F.UPC_E, F.EAN_13, F.EAN_8, F.CODE_128, F.CODE_39, F.CODE_93, F.ITF, F.CODABAR, F.QR_CODE]);
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+    codeReader = new ZXing.BrowserMultiFormatReader(hints, 120);
+    codeReader.decodeFromConstraints(
+        { audio: false, video: { facingMode: { ideal: scanFacing }, width: { ideal: 1920 }, height: { ideal: 1080 },
+                                 advanced: [{ focusMode: 'continuous' }] } },
+        video,
+        function (result) { if (result && !scanBusy && token === scanToken) scanDeliver(result.getText()); }
+    ).then(function () {
+        if (token === scanToken) scanStatusReady();
+    }).catch(function (err) {
+        if (token === scanToken) scanCameraError(err);
+    });
+}
+
 function stopCamera() {
     scanToken++;
+    if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+    if (scanStream) { scanStream.getTracks().forEach(function (t) { t.stop(); }); scanStream = null; }
     if (codeReader) { try { codeReader.reset(); } catch (e) {} codeReader = null; }
+    var v = document.getElementById('scannerVideo');
+    if (v) v.srcObject = null;
 }
 function switchCamera() {
     scanFacing = scanFacing === 'environment' ? 'user' : 'environment';
@@ -1463,8 +1545,7 @@ function handleScanResult(barcode) {
 
     // lookup mode: find the medicine, otherwise offer to add it
     setScanStatus('Looking up ' + barcode + '…', '');
-    fetch(URLS.inventory_barcode + '?barcode=' + encodeURIComponent(barcode))
-        .then(function (r) { return r.json(); })
+    lookupVariants(barcode)
         .then(function (data) {
             if (data.found) {
                 scanFx('ok', data.medicine_name, data.stock_quantity + ' units in stock');
@@ -1519,8 +1600,7 @@ document.addEventListener('keydown', function (e) {
     }
 });
 function gunLookup(code) {
-    fetch(URLS.inventory_barcode + '?barcode=' + encodeURIComponent(code))
-        .then(function (r) { return r.json(); })
+    lookupVariants(code)
         .then(function (data) {
             scanBeep(!!data.found);
             if (data.found) {
@@ -1536,7 +1616,7 @@ function gunLookup(code) {
             }
         })
         .catch(function () { showToast('Lookup failed.', 'error'); });
-}
+    }
 
 // ── Highlight scroll + auto-expand batch ──────────────────
 document.addEventListener('DOMContentLoaded', function() {

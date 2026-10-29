@@ -1509,6 +1509,8 @@ function printCurrentReceipt() {
 let codeReader = null, scanMode = 'cart', scanFacing = 'environment',
     scanBusy = false, scanToken = 0, scanAudio = null;
 
+let scanStream = null, scanTimer = null, scanDetector = null;
+
 // 'cart'   = Scan button: find the medicine and add it to the cart
 // 'search' = camera inside the search box: put the code in the field and search
 function openScanner(mode) {
@@ -1532,42 +1534,115 @@ function setScanStatus(txt, cls) {
     el.textContent = txt;
     el.className = 'scanner-status' + (cls ? ' ' + cls : '');
 }
+// Routes a decoded code to the handler. Also turns EAN-13 "0xxxxxxxxxxxx" into the 12-digit UPC-A.
+function scanDeliver(code) {
+    code = String(code || '').trim();
+    if (/^0\d{12}$/.test(code)) code = code.slice(1);
+    handleBarcodeScan(code);
+}
+// UPC-A and EAN-13 are the same code written two ways, so try both.
+function barcodeVariants(c) {
+    const v = [c];
+    if (/^\d{13}$/.test(c) && c.charAt(0) === '0') v.push(c.slice(1));
+    else if (/^\d{12}$/.test(c)) v.push('0' + c);
+    return v;
+}
+
+function scanCameraError(err) {
+    const n = err && err.name;
+    let msg;
+    if (n === 'NotAllowedError' || n === 'SecurityError') msg = 'Camera permission denied. Allow camera access, or type the barcode below.';
+    else if (n === 'NotFoundError' || n === 'OverconstrainedError') msg = 'No camera found. Type the barcode below.';
+    else if (n === 'NotReadableError') msg = 'Camera is in use by another app.';
+    else msg = 'Camera: ' + ((err && err.message) || 'unavailable');
+    setScanStatus(msg, 'error');
+}
+function scanStatusReady() {
+    setScanStatus('Hold the barcode 10–20 cm away, steady and well lit… (' + (scanFacing === 'user' ? 'front' : 'back') + ' camera)', '');
+}
+
 function startCamera() {
     stopCamera();
     const video = document.getElementById('scannerVideo');
-    if (typeof ZXing === 'undefined') { setScanStatus('Scanner library not loaded. Type the barcode below.', 'error'); return; }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         setScanStatus(window.isSecureContext ? 'Camera not supported on this browser.'
                                              : 'Camera needs a secure (HTTPS) connection. Type the barcode below.', 'error');
         return;
     }
-    const F = ZXing.BarcodeFormat, hints = new Map();
-    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,
-        [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.CODE_93, F.ITF, F.CODABAR, F.QR_CODE, F.DATA_MATRIX]);
-    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-
-    codeReader = new ZXing.BrowserMultiFormatReader(hints, 300);
-    video.classList.toggle('mirror', scanFacing === 'user');   // mirror the front camera preview only
+    video.classList.toggle('mirror', scanFacing === 'user');
     const token = ++scanToken;
-    codeReader.decodeFromConstraints(
-        { audio: false, video: { facingMode: { ideal: scanFacing }, width: { ideal: 1280 }, height: { ideal: 720 } } },
-        video,
-        result => { if (result && !scanBusy && token === scanToken) handleBarcodeScan(result.getText()); }
-    ).then(() => {
-        if (token === scanToken) setScanStatus('Point the camera at a barcode… (' + (scanFacing === 'user' ? 'front' : 'back') + ' camera)', '');
+    if ('BarcodeDetector' in window) startNativeScan(video, token);   // fast, great with 1D codes
+    else startZxingScan(video, token);                                // fallback
+}
+
+// ── Native BarcodeDetector (Chrome / Edge) ──
+function startNativeScan(video, token) {
+    const want = ['upc_a', 'upc_e', 'ean_13', 'ean_8', 'code_128', 'code_39', 'code_93', 'itf', 'codabar', 'qr_code', 'data_matrix'];
+    const getSup = BarcodeDetector.getSupportedFormats ? BarcodeDetector.getSupportedFormats() : Promise.resolve(want);
+    getSup.then(sup => {
+        const use = want.filter(f => sup.indexOf(f) > -1);
+        if (!use.length) throw new Error('nodetector');
+        scanDetector = new BarcodeDetector({ formats: use });
+        return navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: { ideal: scanFacing }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+        });
+    }).then(stream => {
+        if (token !== scanToken) { stream.getTracks().forEach(t => t.stop()); return; }
+        scanStream = stream;
+        video.srcObject = stream;
+        try {                                   // continuous autofocus where supported
+            const track = stream.getVideoTracks()[0], caps = track.getCapabilities ? track.getCapabilities() : {};
+            if (caps.focusMode && caps.focusMode.indexOf('continuous') > -1)
+                track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+        } catch (e) {}
+        return video.play();
+    }).then(() => {
+        if (token !== scanToken || !scanStream) return;
+        scanStatusReady();
+        let busy = false;
+        scanTimer = setInterval(() => {
+            if (busy || scanBusy || token !== scanToken || video.readyState < 2) return;
+            busy = true;
+            scanDetector.detect(video).then(codes => {
+                busy = false;
+                if (codes.length && !scanBusy && token === scanToken) scanDeliver(codes[0].rawValue);
+            }).catch(() => { busy = false; });
+        }, 120);
     }).catch(err => {
-        const n = err && err.name;
-        let msg;
-        if (n === 'NotAllowedError' || n === 'SecurityError') msg = 'Camera permission denied. Allow camera access, or type the barcode below.';
-        else if (n === 'NotFoundError' || n === 'OverconstrainedError') msg = 'No camera found. Type the barcode below.';
-        else if (n === 'NotReadableError') msg = 'Camera is in use by another app.';
-        else msg = 'Camera: ' + ((err && err.message) || 'unavailable');
-        setScanStatus(msg, 'error');
+        if (token !== scanToken) return;
+        if (err && err.message === 'nodetector') { startZxingScan(video, token); return; }
+        scanCameraError(err);
     });
 }
+
+// ── ZXing fallback (Safari / Firefox) ──
+function startZxingScan(video, token) {
+    if (typeof ZXing === 'undefined') { setScanStatus('Scanner library not loaded. Type the barcode below.', 'error'); return; }
+    const F = ZXing.BarcodeFormat, hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,
+        [F.UPC_A, F.UPC_E, F.EAN_13, F.EAN_8, F.CODE_128, F.CODE_39, F.CODE_93, F.ITF, F.CODABAR, F.QR_CODE]);
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+    codeReader = new ZXing.BrowserMultiFormatReader(hints, 120);
+    codeReader.decodeFromConstraints(
+        { audio: false, video: { facingMode: { ideal: scanFacing }, width: { ideal: 1920 }, height: { ideal: 1080 },
+                                 advanced: [{ focusMode: 'continuous' }] } },
+        video,
+        result => { if (result && !scanBusy && token === scanToken) scanDeliver(result.getText()); }
+    ).then(() => {
+        if (token === scanToken) scanStatusReady();
+    }).catch(err => {
+        if (token === scanToken) scanCameraError(err);
+    });
+}
+
 function stopCamera() {
     scanToken++;
+    if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+    if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
     if (codeReader) { try { codeReader.reset(); } catch (e) {} codeReader = null; }
+    const v = document.getElementById('scannerVideo');
+    if (v) v.srcObject = null;
 }
 function switchCamera() {
     scanFacing = scanFacing === 'environment' ? 'user' : 'environment';
@@ -1611,13 +1686,15 @@ function flashField(el) {
 
 // ── Look a barcode up (exact barcode / sub-stock-code match only) ──
 function findByBarcode(code) {
-    const c = code.trim().toLowerCase();
-    return fetch(MEDICINE_SEARCH_URL + '?q=' + encodeURIComponent(code))
+    code = code.trim();
+    const q  = /^0\d{12}$/.test(code) ? code.slice(1) : code;     // search with the 12-digit form
+    const vs = barcodeVariants(q).map(x => x.toLowerCase());
+    return fetch(MEDICINE_SEARCH_URL + '?q=' + encodeURIComponent(q))
         .then(r => r.json())
         .then(d => {
             const results = d.results || [];
-            const med = results.find(m => (m.barcode || '').toLowerCase() === c ||
-                                          (m.sub_code || '').toLowerCase() === c) || null;
+            const med = results.find(m => vs.includes((m.barcode || '').toLowerCase()) ||
+                                          vs.includes((m.sub_code || '').toLowerCase())) || null;
             return { results, med };
         });
 }
