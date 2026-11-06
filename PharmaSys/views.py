@@ -4,6 +4,7 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.auth.models import User
 from django.contrib import messages
+from decimal import Decimal, InvalidOperation
 from django.http import JsonResponse, HttpResponse
 from django.utils import timezone
 from django.db.models import (
@@ -113,11 +114,13 @@ def _deduct_fefo(medicine, qty_needed, performed_by,
         .order_by(F('expiry_date').asc(nulls_last=True), 'received_at')
     )
 
+    used = []
     remaining = qty_needed
     for batch in batches:
         if remaining <= 0:
             break
         take = min(batch.quantity, remaining)
+        price = batch.sell_price
         old_total = medicine.stock_quantity          # before this batch deduction
         batch.quantity -= take
         batch.save()
@@ -140,9 +143,10 @@ def _deduct_fefo(medicine, qty_needed, performed_by,
             notes           = notes,
             performed_by    = performed_by,
         )
+        used.append({'batch': batch, 'qty': take, 'price': price})
         remaining -= take
 
-    return True
+    return used
 
 
 def _format_requisition(seq, ward, year):
@@ -238,7 +242,7 @@ def dashboard_view(request):
         medicine__is_active=True, quantity__gt=0
     ).annotate(
         line_value=ExpressionWrapper(
-            F('medicine__selling_price') * F('quantity'),
+            F('selling_price') * F('quantity'),
             output_field=DecimalField()
         )
     ).aggregate(total=Sum('line_value'))
@@ -673,6 +677,9 @@ def inventory_edit_view(request, pk):
             medicine.manufacturer     = request.POST.get('manufacturer', '').strip()
             medicine.supplier_id      = request.POST.get('supplier') or None
             medicine.barcode          = barcode
+            MedicineStock.objects.filter(
+                medicine=medicine, selling_price__isnull=True
+            ).update(selling_price=medicine.selling_price)       # keep old batches at their current price
             medicine.selling_price    = request.POST.get('selling_price') or 0
             medicine.reorder_level    = int(request.POST.get('reorder_level') or 10)
             medicine.location         = loc
@@ -812,7 +819,9 @@ def medicine_search_ajax(request):
             'batch_number':   fefo_batch.batch_number if fefo_batch else '',
             'expiry_date':    str(fefo_batch.expiry_date) if fefo_batch and fefo_batch.expiry_date else '',
             'purchase_price': str(fefo_batch.purchase_price) if fefo_batch else '0.00',
-            'selling_price':  str(m.selling_price),
+            'selling_price':  str(fefo_batch.sell_price) if fefo_batch else str(m.selling_price),
+            'default_selling_price': str(m.selling_price),
+            'price_tiers':    [{'price': str(t['price']), 'qty': t['qty']} for t in m.price_tiers()],
             'barcode':        m.barcode or '',
             'location_id':    m.location_id or '',
             'sub_code':       m.sub_code or '',
@@ -916,6 +925,15 @@ def stock_in_view(request):
             reference_no   = request.POST.get('reference_no', '').strip()
             notes          = request.POST.get('notes', '').strip()
 
+            raw_sp = request.POST.get('selling_price', '').strip()
+            try:
+                selling_price = Decimal(raw_sp) if raw_sp else None
+                if selling_price is not None and selling_price < 0:
+                    raise ValueError
+            except (InvalidOperation, ValueError):
+                messages.error(request, 'Invalid selling price.')
+                return redirect('stock_management')
+
             if not medicine_id:
                 messages.error(request, 'Please select a medicine.')
                 return redirect('stock_management')
@@ -985,10 +1003,19 @@ def stock_in_view(request):
                     expiry_date    = expiry_date,
                     quantity       = qty,
                     purchase_price = purchase_price,
+                    selling_price  = selling_price,      # None = medicine default
                     supplier_id    = supplier_id,
                     location       = location,
                     created_by     = request.user,
                 )
+                # latest entered price becomes the default that prefills the form
+                if selling_price is not None and selling_price != medicine.selling_price:
+                    # lock in the old price on any batch that has none, before the default changes
+                    MedicineStock.objects.filter(
+                        medicine=medicine, selling_price__isnull=True
+                    ).update(selling_price=medicine.selling_price)
+                    medicine.selling_price = selling_price
+                    medicine.save(update_fields=['selling_price', 'updated_at'])
 
             new_total = medicine.stock_quantity
             StockMovement.objects.create(
@@ -1165,6 +1192,7 @@ def stock_medicine_info(request):
                 'expiry_date':    str(b.expiry_date) if b.expiry_date else '',
                 'quantity':       b.quantity,
                 'purchase_price': str(b.purchase_price),
+                'selling_price':  str(b.sell_price),
                 'supplier_id':    b.supplier_id or '',
                 'is_expired':     b.is_expired,
                 'is_expiring':    b.is_expiring_soon,
@@ -1190,7 +1218,8 @@ def stock_medicine_info(request):
             'stock_status':   m.stock_status,
             'reorder_level':  m.reorder_level,
             'supplier_id':    m.supplier_id or '',
-            'selling_price':  str(m.selling_price),
+            'selling_price':  str(fefo.sell_price) if fefo else str(m.selling_price),
+            'default_selling_price': str(m.selling_price),
             # FEFO batch details
             'batch_number':   fefo.batch_number if fefo else '',
             'expiry_date':    str(fefo.expiry_date) if fefo and fefo.expiry_date else '',
@@ -1856,7 +1885,7 @@ def reports_view(request):
         medicine__is_active=True, quantity__gt=0
     ).annotate(
         line_val=ExpressionWrapper(
-            F('medicine__selling_price') * F('quantity'),
+            F('selling_price') * F('quantity'),
             output_field=DecimalField()
         )
     ).aggregate(total=Sum('line_val'))['total'] or 0
@@ -3796,11 +3825,7 @@ def dispensing_create(request):
                 }, status=400)
             if medicine.is_s2_regulated:
                 has_s2_item = True
-            validated.append({
-                'medicine':   medicine,
-                'qty':        qty,
-                'unit_price': float(item.get('unit_price', medicine.selling_price)),
-            })
+            validated.append({'medicine': medicine, 'qty': qty})
 
         # ── S2 hard block ─────────────────────────────────────────────────────
         doctor = None
@@ -3878,21 +3903,16 @@ def dispensing_create(request):
                     return JsonResponse({'error': 'Enter the Requisition No. for Out Patient.'}, status=400)
         
 
-        subtotal = sum(v['unit_price'] * v['qty'] for v in validated)
-        discount = min(discount_amount, subtotal)
-        total    = subtotal - discount
-
-        # ── Create transaction ────────────────────────────────────────────────
+                # ── Create transaction (amounts filled in after stock is deducted) ────
         txn = Dispensing.objects.create(
             customer_name   = customer_name or 'Walk-in',
             prescription_no = prescription_no,
             notes           = notes,
-            subtotal_amount = subtotal,
-            discount_amount = discount,
-            total_amount    = total,
+            subtotal_amount = 0,
+            discount_amount = 0,
+            total_amount    = 0,
             pharmacist      = request.user,
             doctor          = doctor,
-            # iHOMIS link — stored as plain integers/strings, no cross-DB FK
             ihomis_hpatkey  = ihomis_hpatkey or '',
             ihomis_hpercode = ihomis_hpercode or '',
             patient_type    = patient_type,
@@ -3903,21 +3923,14 @@ def dispensing_create(request):
             requisition_half= requisition_half,
         )
 
-        # ── Create line items & deduct stock (FEFO) ───────────────────────────
+        # ── Deduct stock (FEFO) and create one line per distinct price ────────
         receipt_items = []
+        subtotal = Decimal('0')
         for v in validated:
             medicine = v['medicine']
             qty      = v['qty']
-            price    = v['unit_price']
 
-            DispensingItem.objects.create(
-                dispensing = txn,
-                medicine   = medicine,
-                quantity   = qty,
-                unit_price = price,
-            )
-
-            _deduct_fefo(
+            used = _deduct_fefo(
                 medicine, qty, request.user,
                 movement_type   = 'out',
                 dispensed_to    = customer_name,
@@ -3930,16 +3943,32 @@ def dispensing_create(request):
                 ),
             )
 
-            receipt_items.append({
-                'name':       medicine.medicine_name,
-                'brand':      medicine.brand_name,
-                'form':       medicine.get_dosage_form_display(),
-                'strength':   medicine.strength,
-                'qty':        qty,
-                'unit_price': price,
-                'subtotal':   price * qty,
-                'is_s2':      medicine.is_s2_regulated,
-            })
+            by_price = {}                                   # FEFO order preserved
+            for u in used:
+                by_price[u['price']] = by_price.get(u['price'], 0) + u['qty']
+
+            for price, line_qty in by_price.items():
+                DispensingItem.objects.create(
+                    dispensing=txn, medicine=medicine, quantity=line_qty, unit_price=price)
+                line_total = price * line_qty
+                subtotal  += line_total
+                receipt_items.append({
+                    'name':       medicine.medicine_name,
+                    'brand':      medicine.brand_name,
+                    'form':       medicine.get_dosage_form_display(),
+                    'strength':   medicine.strength,
+                    'qty':        line_qty,
+                    'unit_price': float(price),
+                    'subtotal':   float(line_total),
+                    'is_s2':      medicine.is_s2_regulated,
+                })
+
+        discount = max(Decimal('0'), min(Decimal(str(discount_amount)), subtotal))
+        total    = subtotal - discount
+        txn.subtotal_amount = subtotal
+        txn.discount_amount = discount
+        txn.total_amount    = total
+        txn.save(update_fields=['subtotal_amount', 'discount_amount', 'total_amount'])
 
         # ── Build doctor info for receipt ─────────────────────────────────────
         doctor_info = None
@@ -3960,9 +3989,9 @@ def dispensing_create(request):
                 'customer_name':   customer_name,
                 'prescription_no': prescription_no,
                 'items':           receipt_items,
-                'subtotal':        subtotal,
-                'discount':        discount,
-                'total':           total,
+                'subtotal':        float(subtotal),
+                'discount':        float(discount),
+                'total':           float(total),
                 'doctor':          doctor_info,
                 'patient_type': {'in': 'In Patient', 'out': 'Out Patient'}.get(patient_type, ''),
                 'ward': ward.name if ward else '',
@@ -3974,8 +4003,10 @@ def dispensing_create(request):
         })
 
     except ValueError as e:
+        transaction.set_rollback(True)
         return JsonResponse({'error': str(e)}, status=400)
     except Exception as e:
+        transaction.set_rollback(True)
         return JsonResponse({'error': str(e)}, status=400)
 
 @require(('dispensing', 'dispensing_card'), ajax=True)
@@ -4503,6 +4534,16 @@ def batch_edit_view(request, pk):
         supplier_id = data.get('supplier_id', '')
         batch.supplier_id = supplier_id if supplier_id else None
 
+        raw_sp = str(data.get('selling_price') or '').strip()
+        if raw_sp:
+            try:
+                sp = Decimal(raw_sp)
+                if sp < 0:
+                    raise ValueError
+            except (InvalidOperation, ValueError):
+                return JsonResponse({'error': 'Invalid selling price.'}, status=400)
+            batch.selling_price = sp
+
         # ── Location (works for held batches too; DNR status is untouched) ──
         old_loc = batch.location
         old_eff = old_loc or medicine.location
@@ -4547,6 +4588,7 @@ def batch_edit_view(request, pk):
             'batch_number':   batch.batch_number,
             'expiry_date':    str(batch.expiry_date) if batch.expiry_date else '',
             'purchase_price': str(batch.purchase_price),
+            'selling_price':  str(batch.sell_price),
             'supplier_id':    batch.supplier_id or '',
             'message':        f'Batch "{batch.batch_number or pk}" updated successfully.',
         })
@@ -5071,7 +5113,7 @@ def storage_location_transfer(request):
             take   = min(b.quantity, remaining)
             before = med.stock_quantity
             dest = (med.batches.filter(batch_number=b.batch_number, expiry_date=b.expiry_date,
-                                       do_not_release=False)
+                                       selling_price=b.selling_price, do_not_release=False)
                     .filter(at(dst)).exclude(pk=b.pk).first())
             if dest:                                   # merge into the matching batch at destination
                 dest.quantity += take
@@ -5085,8 +5127,8 @@ def storage_location_transfer(request):
             else:                                      # partial move: split into a new batch
                 dest = MedicineStock.objects.create(
                     medicine=med, batch_number=b.batch_number, expiry_date=b.expiry_date,
-                    quantity=take, purchase_price=b.purchase_price, supplier=b.supplier,
-                    location=dst, created_by=request.user,
+                    quantity=take, purchase_price=b.purchase_price, selling_price=b.selling_price,
+                    supplier=b.supplier, location=dst, created_by=request.user,
                 )
                 MedicineStock.objects.filter(pk=dest.pk).update(received_at=b.received_at)
                 b.quantity -= take
@@ -5255,6 +5297,14 @@ def storage_location_stock_in(request, pk):
     except (ValueError, TypeError):
         return JsonResponse({'ok': False, 'error': 'Invalid purchase price.'}, status=400)
 
+    raw_sp = str(data.get('selling_price', '') or '').strip()
+    try:
+        selling_price = Decimal(raw_sp) if raw_sp else None
+        if selling_price is not None and selling_price < 0:
+            raise ValueError
+    except (InvalidOperation, ValueError):
+        return JsonResponse({'ok': False, 'error': 'Invalid selling price.'}, status=400)
+
     if qty <= 0:
         return JsonResponse({'ok': False, 'error': 'Quantity must be greater than zero.'}, status=400)
     if not batch_number:
@@ -5297,9 +5347,15 @@ def storage_location_stock_in(request, pk):
         else:
             batch = MedicineStock.objects.create(
                 medicine=medicine, batch_number=batch_number, expiry_date=expiry_date,
-                quantity=qty, purchase_price=purchase_price, supplier_id=supplier_id,
-                location=loc, created_by=request.user,
+                quantity=qty, purchase_price=purchase_price, selling_price=selling_price,
+                supplier_id=supplier_id, location=loc, created_by=request.user,
             )
+            if selling_price is not None and selling_price != medicine.selling_price:
+                MedicineStock.objects.filter(
+                    medicine=medicine, selling_price__isnull=True
+                ).update(selling_price=medicine.selling_price)
+                medicine.selling_price = selling_price
+                medicine.save(update_fields=['selling_price', 'updated_at'])
 
         new_total = medicine.stock_quantity
         StockMovement.objects.create(
@@ -5617,7 +5673,10 @@ def _restock(medicine, qty, user, reference_no, notes,
                 reference_no=f'RET-{txn_ref}', batch__isnull=False):
             put_back[mv.batch_id] = put_back.get(mv.batch_id, 0) + mv.quantity
  
-        for batch_id, took in taken.items():
+        bmap  = MedicineStock.objects.in_bulk(list(taken.keys()))
+        order = sorted(taken, key=lambda bid: bmap[bid].sell_price != dispensing_item.unit_price)
+        for batch_id in order:
+            took = taken[batch_id]
             if remaining <= 0:
                 break
             room = took - put_back.get(batch_id, 0)

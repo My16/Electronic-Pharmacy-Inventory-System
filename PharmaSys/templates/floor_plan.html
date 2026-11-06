@@ -645,6 +645,9 @@ select.form-control{cursor:pointer}textarea.form-control{resize:vertical}
             <div class="form-grid" style="margin-top:14px">
                 <div class="form-group"><label class="form-label">Quantity *</label><input type="number" id="siQty" class="form-control" min="1" value="1"></div>
                 <div class="form-group"><label class="form-label">Purchase Price/unit (₱)</label><input type="number" id="siPrice" class="form-control" step="0.01" min="0" placeholder="0.00"></div>
+                <div class="form-group" style="grid-column:span 2"><label class="form-label">Selling Price/unit (₱) *</label>
+                    <input type="number" id="siSell" class="form-control" step="0.01" min="0" placeholder="0.00">
+                    <small style="font-size:11px;color:#94a3b8">Prefilled with the last price. Change it if this delivery sells at a new price. Locked when adding to an existing batch.</small></div>
                 <div class="form-group"><label class="form-label">Batch Number *</label><input type="text" id="siBatch" class="form-control" placeholder="Pick a batch above or type a new one" oninput="siBatchTyped()"></div>
                 <div class="form-group"><label class="form-label">Expiry Date *</label><input type="date" id="siExpiry" class="form-control" onchange="siHint()"></div>
                 <div class="si-hint" id="siHint" style="grid-column:span 2"></div>
@@ -1627,7 +1630,7 @@ function openStockIn(medId) {
     var a = areaOfLoc(loc.id);
     document.getElementById('siSub').textContent = 'Into ' + loc.code + (loc.name && loc.name !== loc.code ? ' — ' + loc.name : '') + (a ? ' · ' + a.name : '');
     document.getElementById('siSoNote').style.display = loc.supply_office ? 'flex' : 'none';
-    ['siSearch','siBatch','siExpiry','siRef','siNotes','siPrice'].forEach(function(id) { document.getElementById(id).value = ''; });
+    ['siSearch','siBatch','siExpiry','siRef','siNotes','siPrice','siSell'].forEach(function(id) { document.getElementById(id).value = ''; });
     document.getElementById('siQty').value = 1;
     document.getElementById('siSupplier').value = '';
     document.getElementById('siResults').classList.remove('open');
@@ -1686,6 +1689,8 @@ function siClear() {
     document.getElementById('siSearch').parentNode.style.display = '';
     document.getElementById('siSearch').value = '';
     document.getElementById('siExpiry').readOnly = false;
+    document.getElementById('siSell').value = '';
+    document.getElementById('siSell').readOnly = false;
     document.getElementById('siHint').className = 'si-hint';
 }
 
@@ -1694,6 +1699,8 @@ function siLoadBatches(medPk) {
         .then(function(r) { return r.json(); })
         .then(function(d) {
             if (!d.found || !SI.med || SI.med.pk !== medPk) return;
+            var spf = document.getElementById('siSell');
+            if (!spf.value && d.default_selling_price) spf.value = d.default_selling_price;
             // only batches whose effective location is THIS location
             SI.batches = (d.batches || []).filter(function(b) {
                 return b.batch_number && String(b.location_id) === String(SI.loc.id);
@@ -1713,7 +1720,7 @@ function siRenderBatches() {
         return '<div class="si-batch' + (b.pk === SI.pickedPk ? ' selected' : '') + (b.do_not_release ? ' disabled' : '') + '"' +
                (b.do_not_release ? '' : ' onclick="siPickBatch(' + i + ')"') + '>' +
                '<div><div class="si-b-no">' + esc(b.batch_number) + '</div>' +
-               '<div class="si-b-sub">Exp: ' + esc(b.expiry_date || 'No expiry') + ' · ₱' + esc(b.purchase_price) + '/unit' + esc(tags) + '</div></div>' +
+               '<div class="si-b-sub">Exp: ' + esc(b.expiry_date || 'No expiry') + ' · ₱' + esc(b.purchase_price) + ' cost · ₱' + esc(b.selling_price) + ' sell' + esc(tags) + '</div></div>' +
                '<span class="si-b-qty">' + b.quantity + ' units</span></div>';
     }).join('');
 }
@@ -1724,6 +1731,7 @@ function siPickBatch(i) {
         SI.pickedPk = null;
         document.getElementById('siBatch').value = '';
         exp.value = ''; exp.readOnly = false;
+        document.getElementById('siSell').readOnly = false;
         siRenderBatches(); siHint(); return;
     }
     SI.pickedPk = b.pk;
@@ -1731,6 +1739,7 @@ function siPickBatch(i) {
     exp.value = b.expiry_date || '';
     exp.readOnly = !!b.expiry_date;                   // same batch = same expiry
     if (b.purchase_price && b.purchase_price !== '0.00') document.getElementById('siPrice').value = b.purchase_price;
+    var spb = document.getElementById('siSell'); spb.value = b.selling_price || ''; spb.readOnly = true;
     if (b.supplier_id) document.getElementById('siSupplier').value = b.supplier_id;
     siRenderBatches(); siHint();
     var q = document.getElementById('siQty'); q.focus(); q.select();
@@ -1740,6 +1749,8 @@ function siBatchTyped() {
     var bn = document.getElementById('siBatch').value.trim(), exp = document.getElementById('siExpiry');
     var m = SI.batches.filter(function(b) { return b.batch_number === bn && !b.do_not_release; })[0];
     SI.pickedPk = m ? m.pk : null;
+    var sps = document.getElementById('siSell');
+    if (m) { sps.value = m.selling_price || sps.value; sps.readOnly = true; } else { sps.readOnly = false; }
     if (m && m.expiry_date) { exp.value = m.expiry_date; exp.readOnly = true; }
     else { exp.readOnly = false; }
     siRenderBatches(); siHint();
@@ -1757,7 +1768,7 @@ function siHint() {
         if (ev && m.expiry_date && ev !== m.expiry_date) {
             h.className = 'si-hint warn'; h.textContent = 'Batch ' + bn + ' already has expiry ' + m.expiry_date + '. Use a different batch number for a different expiry.';
         } else {
-            h.className = 'si-hint add'; h.textContent = 'Adding to existing batch ' + bn + ' (currently ' + m.quantity + ' units).';
+            h.className = 'si-hint add'; h.textContent = 'Adding to existing batch ' + bn + ' (currently ' + m.quantity + ' units). Price stays ₱' + m.selling_price + '.';
         }
     } else {
         h.className = 'si-hint new'; h.textContent = 'New batch ' + bn + ' will be created in ' + SI.loc.code + '.';
@@ -1779,6 +1790,7 @@ function siSubmit() {
         body: JSON.stringify({
             medicine_id: SI.med.pk, quantity: qty, batch_number: batch, expiry_date: exp,
             purchase_price: document.getElementById('siPrice').value,
+            selling_price: document.getElementById('siSell').value,
             supplier_id: document.getElementById('siSupplier').value,
             reference_no: document.getElementById('siRef').value,
             notes: document.getElementById('siNotes').value

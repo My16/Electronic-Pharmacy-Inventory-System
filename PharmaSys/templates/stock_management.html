@@ -250,6 +250,11 @@ textarea.form-control{resize:vertical;min-height:70px}
                         <div class="form-group"><label class="form-label">Quantity *</label><input type="number" name="quantity" class="form-control" min="1" value="1" required></div>
                         <div class="form-group"><label class="form-label">Purchase Price/unit (₱)</label><input type="number" name="purchase_price" id="in_purchase_price" class="form-control" step="0.01" min="0" placeholder="0.00"></div>
                     </div>
+                    <div class="form-group">
+                        <label class="form-label">Selling Price/unit (₱) *</label>
+                        <input type="number" name="selling_price" id="in_selling_price" class="form-control" step="0.01" min="0" placeholder="0.00" required>
+                        <small style="font-size:11px;color:#94a3b8;margin-top:3px;display:block">Prefilled with the last price. Change it if this delivery sells at a new price. Locked when adding to an existing batch.</small>
+                    </div>
                     <div class="form-row">
                         <div class="form-group"><label class="form-label">Batch Number *</label><input type="text" name="batch_number" id="in_batch" class="form-control" placeholder="e.g. BT-2024-001" required oninput="onBatchTyped()"></div>
                         <div class="form-group"><label class="form-label">Expiry Date *</label><input type="date" name="expiry_date" id="in_expiry" class="form-control" required onchange="updateBatchHint()"></div>
@@ -492,6 +497,10 @@ textarea.form-control{resize:vertical;min-height:70px}
                 <input type="number" id="editBatchPrice" class="modal-input" step="0.01" min="0" placeholder="0.00">
             </div>
             <div class="modal-form-group">
+                <label class="modal-label">Selling Price / unit (₱)</label>
+                <input type="number" id="editBatchSellPrice" class="modal-input" step="0.01" min="0" placeholder="0.00">
+            </div>
+            <div class="modal-form-group">
                 <label class="modal-label">Supplier</label>
                 <select id="editBatchSupplier" class="modal-input">
                     <option value="">— None —</option>
@@ -654,6 +663,8 @@ function selectMedicine(tab, med) {
         if (supEl && med.supplier_id) supEl.value = med.supplier_id;
         const ppEl = document.getElementById('in_purchase_price');
         if (ppEl && med.purchase_price && med.purchase_price !== '0.00') ppEl.value = med.purchase_price;
+        const spEl = document.getElementById('in_selling_price');
+        if (spEl) spEl.value = med.default_selling_price || med.selling_price || '';
         const locEl = document.getElementById('in_location_sel');
         if (locEl) locEl.value = med.location_id || '';
         soNote();
@@ -727,7 +738,7 @@ function renderBatchList(tab, batches) {
                     <span class="bi-batch">${escHtml(b.batch_number || 'No batch no.')}</span>
                     ${chip}
                 </div>
-                <div class="bi-expiry">Exp: ${escHtml(expiryTxt)} · ₱${b.purchase_price}/unit${b.location ? ' <span class="loc-tag"><i class="fas fa-location-dot" style="font-size:8px"></i> ' + escHtml(b.location) + '</span>' : ''}</div>
+                <div class="bi-expiry">Exp: ${escHtml(expiryTxt)} · ₱${b.purchase_price} cost · ₱${b.selling_price} sell${b.location ? ' <span class="loc-tag"><i class="fas fa-location-dot" style="font-size:8px"></i> ' + escHtml(b.location) + '</span>' : ''}</div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
                 <span class="bi-qty">${b.quantity} units</span>
@@ -781,6 +792,9 @@ function pickBatchForStockIn(el) {
     exp.value    = b.expiry_date || '';
     exp.readOnly = !!b.expiry_date;                      // same batch = same expiry
     if (b.purchase_price && b.purchase_price !== '0.00') $id('in_purchase_price').value = b.purchase_price;
+    const sp = $id('in_selling_price');
+    sp.value = b.selling_price || '';
+    sp.readOnly = true;                    // existing batch keeps its price
     if (b.supplier_id) $id('in_supplier_sel').value = b.supplier_id;
     $id('in_location_sel').value = b.location_id || '';
     soNote();
@@ -796,6 +810,11 @@ function clearBatchPick(clearFields) {
     pickedBatchNo = '';
     const exp = $id('in_expiry');
     if (exp) exp.readOnly = false;
+    const spc = $id('in_selling_price');
+    if (spc) {
+        spc.readOnly = false;
+        if (clearFields) spc.value = (currentStockData['in'] && currentStockData['in'].default_selling_price) || '';
+    }
     if (clearFields) {
         if ($id('in_batch')) $id('in_batch').value = '';
         if (exp) exp.value = '';
@@ -829,7 +848,7 @@ function updateBatchHint() {
             hint.textContent = `Batch ${bn} already has expiry ${match.expiry_date}. Use a different batch number for a different expiry.`;
         } else {
             hint.className = 'batch-hint add';
-            hint.textContent = `Adding to existing batch ${bn}${match.location ? ' in ' + match.location : ''} (currently ${match.quantity} units).`;
+            hint.textContent = `Adding to existing batch ${bn}${match.location ? ' in ' + match.location : ''} (currently ${match.quantity} units). Price stays ₱${match.selling_price}.`;
         }
         label.textContent = 'Record Stock In (Add to Batch)';
     } else {
@@ -861,6 +880,7 @@ function openBatchEdit(pk, safeJson) {
     document.getElementById('editBatchNumber').value        = b.batch_number  || '';
     document.getElementById('editBatchExpiry').value        = b.expiry_date   || '';
     document.getElementById('editBatchPrice').value         = b.purchase_price || '';
+    document.getElementById('editBatchSellPrice').value     = b.selling_price || '';
     document.getElementById('editBatchSupplier').value      = b.supplier_id  || '';
     document.getElementById('editBatchLocation').value      = b.location_id   || '';
     document.getElementById('batchEditModal').classList.add('open');
@@ -872,6 +892,7 @@ function submitBatchEdit() {
         batch_number:   document.getElementById('editBatchNumber').value.trim(),
         expiry_date:    document.getElementById('editBatchExpiry').value,
         purchase_price: document.getElementById('editBatchPrice').value,
+        selling_price:  document.getElementById('editBatchSellPrice').value,
         supplier_id:    document.getElementById('editBatchSupplier').value,
         location_id:    document.getElementById('editBatchLocation').value,
     };

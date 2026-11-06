@@ -5,7 +5,7 @@ from django.utils import timezone
 from django.db.models import Sum
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from django.db.models import Sum, Q
+from django.db.models import Sum, Q, F
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -502,6 +502,25 @@ class Medicine(models.Model):
         batch = self.batches.releasable().order_by('expiry_date').first()
         return batch.purchase_price if batch else 0
 
+    @property
+    def current_price(self):
+        """Price of the batch FEFO will sell next (falls back to the default price)."""
+        b = (self.batches.releasable()
+             .order_by(F('expiry_date').asc(nulls_last=True), 'received_at').first())
+        return b.sell_price if b else self.selling_price
+
+    def price_tiers(self):
+        """[{'price': Decimal, 'qty': int}] in the order FEFO will sell them."""
+        tiers = []
+        for b in (self.batches.releasable()
+                  .order_by(F('expiry_date').asc(nulls_last=True), 'received_at')):
+            p = b.sell_price
+            if tiers and tiers[-1]['price'] == p:
+                tiers[-1]['qty'] += b.quantity
+            else:
+                tiers.append({'price': p, 'qty': b.quantity})
+        return tiers
+
     class Meta:
         ordering = ['medicine_name']
         verbose_name_plural = 'Medicines'
@@ -549,6 +568,9 @@ class MedicineStock(models.Model):
     expiry_date    = models.DateField(null=True, blank=True)
     quantity       = models.PositiveIntegerField(default=0)
     purchase_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    selling_price  = models.DecimalField(max_digits=10, decimal_places=2,
+                         null=True, blank=True,
+                         help_text='Selling price per unit for this batch')
     supplier       = models.ForeignKey(
                          Supplier, on_delete=models.SET_NULL,
                          null=True, blank=True, related_name='batches')
@@ -583,6 +605,16 @@ class MedicineStock(models.Model):
         return (f"{self.medicine.medicine_name} | "
                 f"Batch {self.batch_number or '—'} | "
                 f"Exp {exp} | Qty {self.quantity}")
+
+    def save(self, *args, **kwargs):
+        # any batch created without a price (adjust, return, etc.) inherits the medicine's default
+        if self.selling_price is None:
+            self.selling_price = self.medicine.selling_price
+        super().save(*args, **kwargs)
+
+    @property
+    def sell_price(self):
+        return self.selling_price if self.selling_price is not None else self.medicine.selling_price
 
     @property
     def is_expired(self):

@@ -1166,7 +1166,7 @@ function renderMedGrid(results) {
             <div class="med-card-form">${escHtml(m.strength)} · ${escHtml(m.dosage_form)}</div>
             ${meta ? `<div class="med-card-meta">${escHtml(meta)}</div>` : ''}
             <div class="med-card-bottom">
-                <span class="med-card-price">₱${parseFloat(m.selling_price || 0).toFixed(2)}</span>
+                <span class="med-card-price">₱${parseFloat(m.selling_price || 0).toFixed(2)}${(m.price_tiers || []).length > 1 ? ` <span style="font-size:10px;font-weight:600;color:#d97706" title="Price changes after ${m.price_tiers[0].qty} units">→ ₱${parseFloat(m.price_tiers[1].price).toFixed(2)} after ${m.price_tiers[0].qty}</span>` : ''}</span>
                 <span class="med-card-stock ${stockClass}">${stockLabel}</span>
             </div>
         </div>`;
@@ -1180,6 +1180,33 @@ function escHtml(s) {
 }
 
 // ── Cart Operations ───────────────────────────────────────────
+// Price for `qty` units, walking the FEFO price tiers (matches what the server charges)
+function linePrice(item, qty) {
+    if (!item.tiers || !item.tiers.length) return item.price * qty;
+    let left = qty, total = 0;
+    for (const t of item.tiers) {
+        const take = Math.min(left, t.qty);
+        total += take * parseFloat(t.price);
+        left -= take;
+        if (left <= 0) break;
+    }
+    if (left > 0) total += left * item.price;   // safety fallback
+    return total;
+}
+
+// Label under the item name: "₱10.00 / unit" or "₱10.00 × 50 → ₱20.00 × 10"
+function priceLabel(item) {
+    if (!item.tiers || !item.tiers.length) return `₱${item.price.toFixed(2)} / unit`;
+    let left = item.qty, parts = [];
+    for (const t of item.tiers) {
+        const take = Math.min(left, t.qty);
+        if (take > 0) parts.push(`₱${parseFloat(t.price).toFixed(2)} × ${take}`);
+        left -= take;
+        if (left <= 0) break;
+    }
+    return parts.join(' → ') || `₱${item.price.toFixed(2)} / unit`;
+}
+
 function addToCart(m) {
     const existing = cart.find(i => i.pk === m.pk);
     if(existing) {
@@ -1192,7 +1219,7 @@ function addToCart(m) {
         cart.push({
             pk: m.pk, name: m.medicine_name, brand: m.brand_name || '', subCode: m.sub_code || '',
             strength: m.strength, dosage: m.dosage_form,
-            price: parseFloat(m.selling_price), qty: 1,
+            price: parseFloat(m.selling_price), tiers: m.price_tiers || [], qty: 1,
             stock: m.stock_quantity, isS2: !!m.is_s2_regulated
         });
     }
@@ -1257,7 +1284,9 @@ function updateCartItemSubtotal(pk) {
     const item      = cart.find(i => i.pk === pk);
     if(!item) return;
     const el = document.querySelector(`.cart-item[data-pk="${pk}"] .cart-item-subtotal`);
-    if(el) el.textContent = `₱${(item.price * item.qty).toFixed(2)}`;
+    if(el) el.textContent = `₱${linePrice(item, item.qty).toFixed(2)}`;
+    const pl = document.querySelector(`.cart-item[data-pk="${pk}"] .cart-item-price`);
+    if(pl) pl.textContent = priceLabel(item);
 }
 
 function updateCartTotalsAndCount() {
@@ -1303,7 +1332,7 @@ function renderCart() {
             <div class="cart-item-info">
                 <div class="cart-item-name">${escHtml(item.name)} ${escHtml(item.strength)}</div>
                 <div class="cart-item-sub">${item.subCode ? '<strong style="color:#00ADB5">' + escHtml(item.subCode) + '</strong> · ' : ''}${item.brand ? escHtml(item.brand) + ' · ' : ''}${escHtml(item.dosage)}</div>
-                <div class="cart-item-price">₱${item.price.toFixed(2)} / unit</div>
+                <div class="cart-item-price">${priceLabel(item)}</div>
             </div>
             <div class="cart-qty-ctrl">
                 <button class="qty-btn" onclick="changeQty(${item.pk}, -1)">−</button>
@@ -1317,7 +1346,7 @@ function renderCart() {
                        onblur="validateQty(${item.pk}, this)">
                 <button class="qty-btn" onclick="changeQty(${item.pk}, 1)">+</button>
             </div>
-            <div class="cart-item-subtotal">₱${(item.price * item.qty).toFixed(2)}</div>
+            <div class="cart-item-subtotal">₱${linePrice(item, item.qty).toFixed(2)}</div>
             <button class="btn-remove-item" onclick="removeItem(${item.pk})" title="Remove">
                 <i class="fas fa-xmark"></i>
             </button>
@@ -1328,7 +1357,7 @@ function renderCart() {
 }
 
 function recalcTotals() {
-    const subtotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
+    const subtotal = cart.reduce((s, i) => s + linePrice(i, i.qty), 0);
     const dVal  = parseFloat(document.getElementById('discountVal').value) || 0;
     const dType = document.getElementById('discountType').value;
     let discount = dType === 'percent' ? subtotal * dVal / 100 : dVal;
