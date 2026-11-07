@@ -697,6 +697,11 @@ def inventory_delete_view(request, pk):
         medicine = get_object_or_404(Medicine, pk=pk)
         name = medicine.medicine_name
         medicine.is_active = False
+        # Free the unique codes so they can be reused. The archived row keeps a
+        # traceable tag, e.g. DM003-001 -> DM003-001~DEL15
+        if medicine.sub_code and '~DEL' not in medicine.sub_code:
+            medicine.sub_code = f'{medicine.sub_code[:30]}~DEL{medicine.pk}'
+        medicine.barcode = None
         medicine.save()
         messages.success(request, f'Medicine "{name}" removed.')
     return redirect('inventory')
