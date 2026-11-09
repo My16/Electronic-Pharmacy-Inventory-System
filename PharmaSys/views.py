@@ -15,7 +15,8 @@ from django.db.models.functions import TruncDay, TruncWeek, TruncMonth
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from .models import (
     UserProfile, UserPermission, Medicine, MedicineCategory, MedicineStock,
-    Supplier, StockMovement, Dispensing, DispensingItem, Doctor, Ward, StockCode
+    Supplier, StockMovement, Dispensing, DispensingItem, Doctor, Ward, StockCode,
+    DosageForm, get_dosage_choices
 )
 import json
 import io
@@ -518,7 +519,7 @@ def inventory_view(request):
         'categories':     MedicineCategory.objects.all(),
         'suppliers':      Supplier.objects.filter(is_active=True),
         'storage_areas': get_storage_areas(),
-        'dosage_choices': Medicine.DOSAGE_FORM_CHOICES,
+        'dosage_choices': get_dosage_choices(),
         'low_stock_items':    low_stock_items,
         'expiring_batches':   expiring_batches,
         'out_of_stock_items': out_of_stock_items,
@@ -4512,6 +4513,97 @@ def category_delete_ajax(request, pk):
     name = cat.name
     cat.delete()
     return JsonResponse({'success': True, 'message': f'Category "{name}" deleted.'})
+
+
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DOSAGE FORM — AJAX search + create + update + delete
+# ─────────────────────────────────────────────────────────────────────────────
+from django.utils.text import slugify
+
+
+def _dosage_name(request):
+    try:
+        data = json.loads(request.body or b'{}')
+    except (ValueError, TypeError):
+        return None
+    return ' '.join(str(data.get('name', '') or '').split())[:60] or None
+
+
+@require(('inventory', 'stock_management'), ajax=True)
+def dosage_form_search_ajax(request):
+    q  = request.GET.get('q', '').strip()
+    qs = DosageForm.objects.all()
+    if q:
+        qs = qs.filter(name__icontains=q)
+    limit = 300 if request.GET.get('all') else 20
+    forms = list(qs.order_by('name')[:limit])
+    codes = [f.code for f in forms]
+
+    counts = dict(Medicine.objects.filter(dosage_form__in=codes)
+                  .order_by().values_list('dosage_form').annotate(n=Count('id')))
+    variants = {}
+    for m in (Medicine.objects.filter(dosage_form__in=codes, is_active=True)
+              .order_by('sub_code', 'medicine_name')):
+        variants.setdefault(m.dosage_form, []).append({
+            'sub_code': m.sub_code or '—', 'name': m.medicine_name,
+            'strength': m.strength, 'form': m.get_dosage_form_display(),
+        })
+    return JsonResponse({'results': [
+        {'pk': f.pk, 'name': f.name, 'count': counts.get(f.code, 0),
+         'variants': variants.get(f.code, [])} for f in forms]})
+
+
+@require('inventory', 'edit', ajax=True)
+@require_POST
+def dosage_form_create(request):
+    name = _dosage_name(request)
+    if not name:
+        return JsonResponse({'error': 'Dosage form name cannot be empty.'}, status=400)
+    if DosageForm.objects.filter(name__iexact=name).exists():
+        return JsonResponse({'error': f'Dosage form "{name}" already exists.'}, status=400)
+    base = slugify(name).replace('-', '_')[:26] or 'form'
+    code, n = base, 2
+    while DosageForm.objects.filter(code=code).exists():
+        code = f'{base}_{n}'
+        n += 1
+    f = DosageForm.objects.create(code=code, name=name)
+    return JsonResponse({'success': True, 'pk': f.pk, 'name': f.name,
+                         'message': f'Dosage form "{f.name}" added.'})
+
+
+@require('inventory', 'edit', ajax=True)
+@require_POST
+def dosage_form_update(request, pk):
+    f    = get_object_or_404(DosageForm, pk=pk)
+    name = _dosage_name(request)
+    if not name:
+        return JsonResponse({'error': 'Dosage form name cannot be empty.'}, status=400)
+    if DosageForm.objects.filter(name__iexact=name).exclude(pk=pk).exists():
+        return JsonResponse({'error': f'Dosage form "{name}" already exists.'}, status=400)
+    f.name = name
+    f.save()
+    return JsonResponse({'success': True, 'pk': f.pk, 'name': f.name,
+                         'message': f'Dosage form renamed to "{f.name}".'})
+
+
+@require(level='admin', ajax=True)
+@require_POST
+def dosage_form_delete(request, pk):
+    f = get_object_or_404(DosageForm, pk=pk)
+    n = Medicine.objects.filter(dosage_form=f.code).count()
+    if n:
+        return JsonResponse(
+            {'error': f'Cannot delete "{f.name}": {n} medicine(s) still use it. '
+                      'Change their dosage form first.'}, status=400)
+    name = f.name
+    f.delete()
+    return JsonResponse({'success': True, 'message': f'Dosage form "{name}" deleted.'})
+
+
+    
 
 # ─────────────────────────────────────────────────────────────────────────────
 # BATCH MANAGEMENT — AJAX edit + soft-delete

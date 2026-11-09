@@ -25,6 +25,12 @@ urlpatterns = [
     path('inventory/stock-codes/<int:pk>/delete/',   views.stock_code_delete,      name='stock_code_delete'),
     path('category/<int:pk>/update/', views.category_update_ajax, name='category_update_ajax'),
     path('category/<int:pk>/delete/', views.category_delete_ajax, name='category_delete_ajax'),
+    
+    # ── Dosage Forms ───────────────────────────────────────────────────────────
+    path('dosage-forms/search/',          views.dosage_form_search_ajax, name='dosage_form_search_ajax'),
+    path('dosage-forms/create/',          views.dosage_form_create,      name='dosage_form_create'),
+    path('dosage-forms/<int:pk>/update/', views.dosage_form_update,      name='dosage_form_update'),
+    path('dosage-forms/<int:pk>/delete/', views.dosage_form_delete,      name='dosage_form_delete'),
 
     # ── Medicine search (AJAX) ────────────────────────────────────────────────
     path('api/medicine-search/',    views.medicine_search_ajax,  name='medicine_search_ajax'),

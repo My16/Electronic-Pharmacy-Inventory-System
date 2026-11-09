@@ -3,7 +3,8 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
 from django.db.models import Sum
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, post_delete
+from django.core.cache import cache
 from django.dispatch import receiver
 from django.db.models import Sum, Q, F
 
@@ -380,25 +381,6 @@ class StockCode(models.Model):
 # ─────────────────────────────────────────────────────────────────────────────
 class Medicine(models.Model):
 
-    DOSAGE_FORM_CHOICES = [
-        ('tablet',              'Tablet'),
-        ('effervescent_tablet', 'Effervescent Tablet'),
-        ('capsule',             'Capsule'),
-        ('syrup',               'Syrup'),
-        ('suspension',          'Suspension'),
-        ('vial',                'Vial'),
-        ('ampule',              'Ampule'),
-        ('prefilled_syringe',   'Pre-filled Syringe'),
-        ('nebule',              'Nebule'),
-        ('sachet',              'Sachet'),
-        ('cream',               'Cream'),
-        ('ointment',            'Ointment'),
-        ('drops',               'Drops'),
-        ('inhaler',             'Inhaler'),
-        ('patch',               'Patch'),
-        ('suppository',         'Suppository'),
-    ]
-
     medicine_name    = models.CharField(max_length=200)
     generic_name     = models.CharField(max_length=200)
     stock_code = models.ForeignKey(
@@ -410,7 +392,7 @@ class Medicine(models.Model):
     category         = models.ForeignKey(
                            MedicineCategory, on_delete=models.SET_NULL,
                            null=True, blank=True, related_name='medicines')
-    dosage_form      = models.CharField(max_length=20, choices=DOSAGE_FORM_CHOICES, default='tablet')
+    dosage_form      = models.CharField(max_length=30, default='tablet')
     strength         = models.CharField(max_length=100)
     manufacturer     = models.CharField(max_length=200, blank=True)
     supplier         = models.ForeignKey(
@@ -435,6 +417,11 @@ class Medicine(models.Model):
 
     def __str__(self):
         return f"{self.medicine_name} {self.strength}"
+
+    
+    
+    def get_dosage_form_display(self):
+        return dosage_form_map().get(self.dosage_form) or self.dosage_form.replace('_', ' ').title()
 
     # ── Aggregated stock across all batches ───────────────────
     @property
@@ -860,3 +847,37 @@ class MedicineReturnItem(models.Model):
     class Meta:
         verbose_name        = 'Medicine Return Item'
         verbose_name_plural = 'Medicine Return Items'
+
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DOSAGE FORM  (managed list; Medicine.dosage_form stores the `code`)
+# ─────────────────────────────────────────────────────────────────────────────
+class DosageForm(models.Model):
+    code = models.CharField(max_length=30, unique=True)   # never edited
+    name = models.CharField(max_length=60, unique=True)   # label shown to users
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        ordering = ['name']
+
+
+def dosage_form_map():
+    m = cache.get('dosage_form_map')
+    if m is None:
+        m = dict(DosageForm.objects.values_list('code', 'name'))
+        cache.set('dosage_form_map', m, 60)
+    return m
+
+
+def get_dosage_choices():
+    return list(DosageForm.objects.order_by('name').values_list('code', 'name'))
+
+
+@receiver(post_save, sender=DosageForm)
+@receiver(post_delete, sender=DosageForm)
+def _clear_dosage_cache(sender, **kwargs):
+    cache.delete('dosage_form_map')

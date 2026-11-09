@@ -260,6 +260,14 @@ tr.group-row.open .grp-chev{transform:rotate(90deg)}
 .scanner-box.warn .scan-flash{display:flex;background:rgba(217,119,6,.9)}
 .scanner-box.warn .scan-line{display:none}
 
+
+.manage-menu{position:relative}
+.manage-dd{display:none;position:absolute;right:0;top:calc(100% + 6px);min-width:190px;background:#fff;border:1px solid #e0e6ed;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:700;overflow:hidden}
+.manage-menu.open .manage-dd{display:block}
+.manage-dd button{display:flex;align-items:center;gap:9px;width:100%;border:none;background:#fff;padding:10px 14px;font-size:12.5px;font-weight:600;font-family:'Poppins',sans-serif;color:#1a2433;cursor:pointer;text-align:left}
+.manage-dd button:hover{background:#f0f4f8}
+.manage-dd button i{color:#00ADB5;width:14px}
+
 </style>
 {% endblock %}
 
@@ -363,7 +371,15 @@ tr.group-row.open .grp-chev{transform:rotate(90deg)}
             {% endif %}
             <button class="btn-scan" onclick="openScanner()"><i class="fas fa-barcode"></i> Scan</button>
             <button class="btn-scan" onclick="openStockCodes()"><i class="fas fa-hashtag"></i> Stock Codes</button>
-            <button class="btn-scan" onclick="openCategories()"><i class="fas fa-tags"></i> Categories</button>
+            <div class="manage-menu" id="manageMenu">
+                <button type="button" class="btn-scan" onclick="toggleManageMenu(event)">
+                    <i class="fas fa-sliders"></i> Manage <i class="fas fa-chevron-down" style="font-size:10px"></i>
+                </button>
+                <div class="manage-dd">
+                    <button type="button" onclick="openCategories()"><i class="fas fa-tags"></i> Categories</button>
+                    <button type="button" onclick="openDosageForms()"><i class="fas fa-capsules"></i> Dosage Forms</button>
+                </div>
+            </div>
             {% if can_manage %}
             <button class="btn-add" onclick="openAddModal()"><i class="fas fa-plus"></i> Add Medicine</button>
             {% endif %}
@@ -998,6 +1014,39 @@ tr.group-row.open .grp-chev{transform:rotate(90deg)}
     </div>
 </div>
 
+<!-- Dosage Form Manager Modal -->
+<div class="modal-overlay" id="dfModal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title"><i class="fas fa-capsules"></i>Dosage Forms</div>
+            <button class="modal-close" onclick="closeModal('dfModal')"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            {% if can_manage %}
+            <div class="section-label">Add / Edit Dosage Form</div>
+            <input type="hidden" id="df_edit_pk">
+            <div class="form-group">
+                <label class="form-label">Dosage Form Name *</label>
+                <input type="text" id="df_name" class="form-control" maxlength="60" placeholder="e.g. Lozenge"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();dfSave();}">
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+                <button type="button" class="btn-cancel" id="df_cancel_edit" style="display:none" onclick="dfResetForm()">Cancel edit</button>
+                <button type="button" class="btn-submit" id="df_save_btn" onclick="dfSave()">Add Dosage Form</button>
+            </div>
+            {% endif %}
+
+            <div class="section-label">Existing Dosage Forms</div>
+            <div class="search-box" style="margin-bottom:10px;"><i class="fas fa-search"></i>
+                <input type="text" id="df_filter" placeholder="Filter…" style="width:100%" oninput="dfLoadList()"></div>
+            <table class="data-table">
+                <thead><tr><th>Dosage Form</th><th>Medicines</th><th>Actions</th></tr></thead>
+                <tbody id="df_list"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
 <!-- Stock Code Modal -->
 <div class="modal-overlay" id="scModal">
     <div class="modal">
@@ -1070,6 +1119,10 @@ const URLS = {
     stock_code_delete: "{% url 'stock_code_delete' pk=0 %}".replace('/0/', '/__PK__/'),
     category_update:   "{% url 'category_update_ajax' pk=0 %}".replace('/0/', '/__PK__/'),
     category_delete:   "{% url 'category_delete_ajax' pk=0 %}".replace('/0/', '/__PK__/'),
+    dosage_search: "{% url 'dosage_form_search_ajax' %}",
+    dosage_create: "{% url 'dosage_form_create' %}",
+    dosage_update: "{% url 'dosage_form_update' pk=0 %}".replace('/0/', '/__PK__/'),
+    dosage_delete: "{% url 'dosage_form_delete' pk=0 %}".replace('/0/', '/__PK__/'),
 };
 const CSRF = '{{ csrf_token }}';
 
@@ -1091,6 +1144,7 @@ function closeModal(id) {
     if (id === 'addModal')  scClear('add');
     if (id === 'editModal') scClear('edit');
     if (id === 'catModal' && cmChanged) window.location.reload();
+    if (id === 'dfModal' && dfChanged) window.location.reload();
 }
 document.querySelectorAll('.modal-overlay').forEach(function(o) {
     o.addEventListener('click', function(e) {
@@ -1099,6 +1153,7 @@ document.querySelectorAll('.modal-overlay').forEach(function(o) {
             if (o.id === 'addModal')  catClear('add');
             if (o.id === 'editModal') catClear('edit');
             if (o.id === 'catModal' && cmChanged) window.location.reload();
+            if (o.id === 'dfModal' && dfChanged) window.location.reload();
         }
     });
 });
@@ -1884,6 +1939,89 @@ function cmDelete(i){
             fetch(URLS.category_delete.replace('__PK__', c.pk), { method:'POST', headers:{'X-CSRFToken':CSRF} })
               .then(function(r){ return r.json(); })
               .then(function(d){ if (d.success){ cmChanged = true; showToast(d.message); cmLoadList(); } else showToast(d.error||'Failed.','error'); })
+              .catch(function(){ showToast('Network error.', 'error'); });
+        }
+    });
+}
+
+
+// ── Manage dropdown ───────────────────────────────────────
+function toggleManageMenu(e) { e.stopPropagation(); document.getElementById('manageMenu').classList.toggle('open'); }
+document.addEventListener('click', function(){ document.getElementById('manageMenu').classList.remove('open'); });
+
+// ── Dosage form manager (add / edit / delete) ─────────────
+var dfChanged = false, dfList = [];
+function openDosageForms(){
+    dfChanged = false; dfResetForm();
+    document.getElementById('df_filter').value = '';
+    dfLoadList(); openModal('dfModal');
+}
+function dfResetForm(){
+    var pk = document.getElementById('df_edit_pk');
+    if (!pk) return;
+    pk.value = ''; document.getElementById('df_name').value = '';
+    document.getElementById('df_save_btn').textContent = 'Add Dosage Form';
+    document.getElementById('df_cancel_edit').style.display = 'none';
+}
+function dfLoadList(){
+    var q = document.getElementById('df_filter').value.trim();
+    fetch(URLS.dosage_search + '?all=1&q=' + encodeURIComponent(q))
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        dfList = data.results;
+        document.getElementById('df_list').innerHTML = dfList.length ? dfList.map(function(c,i){
+            var vs = c.variants || [];
+            var detail = vs.length ? vs.map(function(v){
+                return '<div style="padding:3px 0"><strong>'+_esc(v.sub_code)+'</strong> — '+_esc(v.name)+' '+_esc(v.strength)+'</div>';
+            }).join('') : '<em style="color:#94a3b8">No medicines yet.</em>';
+            return '<tr style="cursor:pointer" onclick="dfToggle('+i+')">'
+              + '<td><strong>'+_esc(c.name)+'</strong></td>'
+              + '<td>'+c.count+' <i class="fas fa-chevron-down" style="font-size:10px;color:#94a3b8"></i></td>'
+              + '<td><div class="action-btns" onclick="event.stopPropagation()">'
+                {% if can_manage %}+ '<button class="btn-icon edit" title="Edit" onclick="dfEdit('+i+')"><i class="fas fa-pen-to-square"></i></button>'{% endif %}
+                {% if can_admin %}+ '<button class="btn-icon delete" title="Delete" onclick="dfDelete('+i+')"><i class="fas fa-trash-can"></i></button>'{% endif %}
+              + '</div></td></tr>'
+              + '<tr id="dfv-'+i+'" style="display:none"><td colspan="3" style="background:#f8fafc;font-size:12px">'+detail+'</td></tr>';
+        }).join('') : '<tr><td colspan="3" style="text-align:center;color:#b0bec5;padding:14px">No dosage forms yet.</td></tr>';
+      });
+}
+function dfToggle(i){
+    var r = document.getElementById('dfv-'+i);
+    r.style.display = r.style.display === 'none' ? 'table-row' : 'none';
+}
+function dfEdit(i){
+    var c = dfList[i];
+    document.getElementById('df_edit_pk').value = c.pk;
+    document.getElementById('df_name').value = c.name;
+    document.getElementById('df_save_btn').textContent = 'Save Changes';
+    document.getElementById('df_cancel_edit').style.display = 'inline-block';
+    document.getElementById('df_name').focus();
+}
+function dfSave(){
+    var pk   = document.getElementById('df_edit_pk').value;
+    var name = document.getElementById('df_name').value.trim();
+    if (!name){ showToast('Dosage form name cannot be empty.', 'error'); return; }
+    var url = pk ? URLS.dosage_update.replace('__PK__', pk) : URLS.dosage_create;
+    fetch(url, { method:'POST', headers:{'X-CSRFToken':CSRF,'Content-Type':'application/json'},
+        body: JSON.stringify({ name: name }) })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (d.success){ dfChanged = true; showToast(d.message); dfResetForm(); dfLoadList(); }
+        else showToast(d.error || 'Failed.', 'error');
+      })
+      .catch(function(){ showToast('Network error.', 'error'); });
+}
+function dfDelete(i){
+    var c = dfList[i];
+    openDelModal({
+        title:   'Delete Dosage Form',
+        msg:     'Delete dosage form <strong>' + _esc(c.name) + '</strong>? This cannot be undone.',
+        warn:    c.count ? c.count + ' medicine(s) still use this dosage form. Change them first.' : '',
+        blocked: c.count > 0,
+        run: function(){
+            fetch(URLS.dosage_delete.replace('__PK__', c.pk), { method:'POST', headers:{'X-CSRFToken':CSRF} })
+              .then(function(r){ return r.json(); })
+              .then(function(d){ if (d.success){ dfChanged = true; showToast(d.message); dfLoadList(); } else showToast(d.error||'Failed.','error'); })
               .catch(function(){ showToast('Network error.', 'error'); });
         }
     });
